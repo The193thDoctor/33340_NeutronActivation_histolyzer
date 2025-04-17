@@ -11,6 +11,7 @@ A Python tool for analyzing gamma radiation spectra, particularly useful for neu
 - Detailed visualization of spectra and fitted peaks
 - Summary of all peak positions across multiple isotopes
 - Automatic output organization
+- Channel to energy conversion with the form Channel = a + b*Energy
 
 ## Installation
 
@@ -54,7 +55,8 @@ The application will intelligently try to interpret various file formats.
 3. View the full spectrum
 4. Select channels for background subtraction
 5. Review Gaussian fits and uncertainty analysis
-6. Get a summary of all peak positions
+6. Optionally convert channels to energy using the formula Channel = a + b*Energy
+7. Get a summary of all peak positions
 
 ### Output
 

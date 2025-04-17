@@ -10,7 +10,7 @@ from scipy import stats
 def read_spectrum_data(filepath):
     """
     Read spectroscopy data from CSV file and extract histogram data.
-    
+    1
     Args:
         filepath: Path to the CSV file
         
@@ -176,8 +176,8 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
     Returns:
         Fitted peak parameters (center, width, amplitude, uncertainty)
     """
-    # Generate file prefix for outputs
-    file_prefix = f"{element_name}_{peak_id}" if peak_id else element_name
+    # Generate file prefix for outputs - peak_id is now just the number
+    file_prefix = f"{element_name}_peak{peak_id}" if peak_id else element_name
     
     # Get counts at the specified channels
     start_count = data.loc[data['Channel'] == start_ch, 'Counts'].values[0]
@@ -453,7 +453,7 @@ def process_peak(data, element_name, peak_id=None, output_folder=None):
         data, start_ch, end_ch, element_name, peak_id, uncertainty_factor, output_folder)
     
     # Generate output filenames based on element name and peak ID
-    file_prefix = f"{element_name}_{peak_id}" if peak_id else element_name
+    file_prefix = f"{element_name}_peak{peak_id}" if peak_id else element_name
     
     # Define output paths based on output folder
     if output_folder:
@@ -512,7 +512,7 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None):
     
     for i in range(num_peaks):
         # For a single peak, use None as peak_id. For multiple peaks, use numbers.
-        peak_id = f"peak{i+1}" if num_peaks > 1 else None
+        peak_id = f"{i+1}" if num_peaks > 1 else None
         fit_results = process_peak(data, element_name, peak_id, output_folder)
         all_results[peak_id or 'main'] = fit_results
         
@@ -525,19 +525,128 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None):
         label_peaks = input("\nDo you want to create a spectrum with labeled peak positions? (y/n): ").lower().startswith('y')
         
         if label_peaks:
-            # Create labels for each peak
-            peak_labels = []
-            for i, (loc, err) in enumerate(zip(peak_locations, peak_uncertainties)):
-                peak_label = f"Ch: {loc:.1f}±{err:.1f}"
-                # Find the closest channel in the data
-                closest_channel = int(round(loc))
-                peak_labels.append((closest_channel, peak_label))
+            # Ask if user wants to convert to energy (MeV)
+            use_energy = input("\nDo you want to convert the x-axis to energy (MeV)? (y/n): ").lower().startswith('y')
             
-            # Create a new plot with the fitted peak positions labeled
-            title = f"{element_name} Radiation Spectrum (Fitted Peaks)"
-            file_prefix = f"{element_name}_labeled"
-            plot_histogram(data, element_name, title=title, file_prefix=file_prefix, 
-                          output_folder=output_folder, peak_labels=peak_labels)
+            a = None
+            b = None
+            a_err = None
+            b_err = None
+            
+            if use_energy:
+                # Get conversion parameters (C = a + b*E)
+                print("\nPlease enter the parameters for the conversion: Channel = a + b*Energy(MeV)")
+                while True:
+                    try:
+                        a = float(input("Parameter a: "))
+                        a_err = float(input("Uncertainty in a: "))
+                        b = float(input("Parameter b: "))
+                        b_err = float(input("Uncertainty in b: "))
+                        
+                        if b == 0:
+                            print("Error: Parameter 'b' cannot be zero.")
+                            continue
+                        
+                        break
+                    except ValueError:
+                        print("Error: Please enter valid numbers.")
+                
+                # Create a copy of the data with energy axis
+                data_with_energy = data.copy()
+                # Convert channel to energy: E = (C-a)/b
+                data_with_energy['Energy_MeV'] = (data_with_energy['Channel'] - a) / b
+                
+                # Convert peak locations to energy with propagated errors
+                energy_peaks = []
+                energy_uncertainties = []
+                
+                for loc, err in zip(peak_locations, peak_uncertainties):
+                    # Convert channel to energy: E = (C-a)/b
+                    energy = (loc - a) / b
+                    
+                    # Propagate uncertainties
+                    # For function E = (C-a)/b, the uncertainty is:
+                    # σ_E^2 = (∂E/∂C)^2 * σ_C^2 + (∂E/∂a)^2 * σ_a^2 + (∂E/∂b)^2 * σ_b^2
+                    # where ∂E/∂C = 1/b, ∂E/∂a = -1/b, ∂E/∂b = -(C-a)/b^2
+                    
+                    dE_dC = 1/b
+                    dE_da = -1/b
+                    dE_db = -(loc-a)/(b**2)
+                    
+                    energy_err = np.sqrt((dE_dC**2 * err**2) + 
+                                         (dE_da**2 * a_err**2) + 
+                                         (dE_db**2 * b_err**2))
+                    
+                    energy_peaks.append(energy)
+                    energy_uncertainties.append(energy_err)
+                
+                # Create labels for each peak in energy units
+                peak_labels = []
+                for i, (energy, err) in enumerate(zip(energy_peaks, energy_uncertainties)):
+                    peak_label = f"{energy:.3f}±{err:.3f} MeV"
+                    # Find the corresponding channel
+                    channel = peak_locations[i]
+                    closest_channel = int(round(channel))
+                    peak_labels.append((closest_channel, peak_label))
+                
+                # Create a new plot with the fitted peak positions labeled in energy
+                plt.figure(figsize=(12, 6))
+                plt.bar(data_with_energy['Energy_MeV'], data['Counts'], width=(data_with_energy['Energy_MeV'].max() - data_with_energy['Energy_MeV'].min())/len(data_with_energy), 
+                       color='blue', alpha=0.7)
+                
+                plt.xlabel('Energy (MeV)')
+                plt.ylabel('Counts')
+                
+                title = f"{element_name} Radiation Spectrum (Fitted Peaks)"
+                plt.title(title)
+                
+                plt.grid(True, alpha=0.3)
+                
+                # Add peak labels
+                for channel, label in peak_labels:
+                    energy_value = (channel - a) / b
+                    plt.annotate(label,
+                                 xy=(energy_value, data.loc[data['Channel'] == channel, 'Counts'].values[0] 
+                                     if channel in data['Channel'].values 
+                                     else data['Counts'].max() * 0.9),
+                                 xytext=(0, 10),
+                                 textcoords='offset points',
+                                 ha='center')
+                
+                plt.tight_layout()
+                
+                # File name and save
+                file_prefix = f"{element_name}_energy_labeled"
+                if output_folder:
+                    output_path = os.path.join(output_folder, f"{file_prefix}_spectrum.png")
+                else:
+                    output_path = f"{file_prefix}_spectrum.png"
+                
+                plt.savefig(output_path, dpi=300)
+                plt.show()
+                
+                print(f"Energy spectrum saved to: {output_path}")
+                
+                # Print energy peak summary
+                print("\n=== Peak Energies ===")
+                for i, (energy, err) in enumerate(zip(energy_peaks, energy_uncertainties)):
+                    peak_num = i+1 if len(energy_peaks) > 1 else ""
+                    print(f"Peak {peak_num}: {energy:.4f} ± {err:.4f} MeV")
+                
+            else:
+                # Create labels for each peak in channel units
+                peak_labels = []
+                for i, (loc, err) in enumerate(zip(peak_locations, peak_uncertainties)):
+                    peak_label = f"Ch: {loc:.1f}±{err:.1f}"
+                    # Find the closest channel in the data
+                    closest_channel = int(round(loc))
+                    peak_labels.append((closest_channel, peak_label))
+                
+                # Create a new plot with the fitted peak positions labeled
+                title = f"{element_name} Radiation Spectrum (Fitted Peaks)"
+                file_prefix = f"{element_name}_labeled"
+                plot_histogram(data, element_name, title=title, file_prefix=file_prefix, 
+                              output_folder=output_folder, peak_labels=peak_labels)
     
     # Return all the results as well as peaks information
     return {
@@ -661,7 +770,8 @@ def process_multiple_isotopes():
                     all_peak_locations.append(loc)
                     all_peak_uncertainties.append(err)
                     if len(isotope_data['peak_locations']) > 1:
-                        peak_labels.append(f"{element_name}_peak{j+1}")
+                        # Use consistent format with the numbered peak_id
+                        peak_labels.append(f"{element_name} Peak {j+1}")
                     else:
                         peak_labels.append(element_name)
                 
@@ -736,7 +846,8 @@ def process_multiple_isotopes():
                     all_peak_locations.append(loc)
                     all_peak_uncertainties.append(err)
                     if len(isotope_data['peak_locations']) > 1:
-                        peak_labels.append(f"{element_name}_peak{j+1}")
+                        # Use consistent format with the numbered peak_id
+                        peak_labels.append(f"{element_name} Peak {j+1}")
                     else:
                         peak_labels.append(element_name)
                 
@@ -760,7 +871,66 @@ def process_multiple_isotopes():
         print("\nPeak Uncertainties (channels, 1σ):")
         print(all_peak_uncertainties)
         
-        print("="*70)
+        # Ask if user wants to convert to energy
+        use_energy = input("\nDo you want to convert peak locations to energy (MeV)? (y/n): ").lower().startswith('y')
+        
+        if use_energy:
+            # Get conversion parameters (C = a + b*E)
+            print("\nPlease enter the parameters for the conversion: Channel = a + b*Energy(MeV)")
+            while True:
+                try:
+                    a = float(input("Parameter a: "))
+                    a_err = float(input("Uncertainty in a: "))
+                    b = float(input("Parameter b: "))
+                    b_err = float(input("Uncertainty in b: "))
+                    
+                    if b == 0:
+                        print("Error: Parameter 'b' cannot be zero.")
+                        continue
+                    
+                    break
+                except ValueError:
+                    print("Error: Please enter valid numbers.")
+            
+            # Convert peak locations to energy with propagated errors
+            energy_peaks = []
+            energy_uncertainties = []
+            
+            for loc, err in zip(all_peak_locations, all_peak_uncertainties):
+                # Convert channel to energy: E = (C-a)/b
+                energy = (loc - a) / b
+                
+                # Propagate uncertainties
+                # For function E = (C-a)/b, the uncertainty is:
+                # σ_E^2 = (∂E/∂C)^2 * σ_C^2 + (∂E/∂a)^2 * σ_a^2 + (∂E/∂b)^2 * σ_b^2
+                # where ∂E/∂C = 1/b, ∂E/∂a = -1/b, ∂E/∂b = -(C-a)/b^2
+                
+                dE_dC = 1/b
+                dE_da = -1/b
+                dE_db = -(loc-a)/(b**2)
+                
+                energy_err = np.sqrt((dE_dC**2 * err**2) + 
+                                     (dE_da**2 * a_err**2) + 
+                                     (dE_db**2 * b_err**2))
+                
+                energy_peaks.append(energy)
+                energy_uncertainties.append(energy_err)
+            
+            print("\n" + "="*70)
+            print("ENERGY CONVERSION RESULTS".center(70))
+            print("="*70)
+            
+            print("\nPeak Energies (MeV):")
+            print([f"{e:.4f}" for e in energy_peaks])
+            
+            print("\nPeak Energy Uncertainties (MeV, 1σ):")
+            print([f"{e:.4f}" for e in energy_uncertainties])
+            
+            print("\nDetailed Peak Energies:")
+            for i, (energy, err, label) in enumerate(zip(energy_peaks, energy_uncertainties, peak_labels)):
+                print(f"{i+1}: {label} = {energy:.4f} ± {err:.4f} MeV")
+        
+        print("\n" + "="*70)
         print("Copy-paste the above lists for your records!".center(70))
         print("="*70)
     
