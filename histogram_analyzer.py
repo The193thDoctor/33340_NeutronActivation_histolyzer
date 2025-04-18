@@ -112,6 +112,9 @@ def plot_histogram(data, element_name, title=None, file_prefix=None, output_fold
     plt.xlabel('Channel')
     plt.ylabel('Counts')
     
+    # Set x-axis to start from 0 and end at the highest channel
+    plt.xlim(0, data['Channel'].max())
+    
     if title:
         plt.title(title)
     else:
@@ -282,15 +285,15 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         # 3. Channel discretization error (half a channel)
         channel_err = 0.5
         
-        # Combine all error sources - take the maximum
-        final_err = np.max([perr[1], width_based_err, background_var_err, channel_err])
+        # Combine errors in quadrature (for independent error sources)
+        final_err = np.sqrt(perr[1]**2 + background_var_err**2 + channel_err**2)
         
         print(f"\nUncertainty Estimation Components:")
         print(f"Statistical (from fit): {perr[1]:.4f} channels")
-        print(f"Width-based (10% of sigma): {width_based_err:.4f} channels")
+        print(f"Width-based (10% of sigma): {width_based_err:.4f} channels") 
         print(f"Background variation: {background_var_err:.4f} channels")
         print(f"Channel discretization: {channel_err:.4f} channels")
-        print(f"Combined (max): {final_err:.4f} channels")
+        print(f"Combined (quadrature): {final_err:.4f} channels")
         
         # Plot the results
         plt.figure(figsize=(12, 12))
@@ -431,7 +434,7 @@ def process_peak(data, element_name, peak_id=None, output_folder=None):
                       f"{data['Channel'].min()} to {data['Channel'].max()}")
                 continue
             
-            end_ch = int(input(f"Enter ending channel for {peak_title}: "))
+            end_ch = int(input(f"Enter ending chclaudeannel for {peak_title}: "))
             if end_ch not in data['Channel'].values:
                 print(f"Warning: Channel {end_ch} not found in data. Available range: "
                       f"{data['Channel'].min()} to {data['Channel'].max()}")
@@ -442,6 +445,7 @@ def process_peak(data, element_name, peak_id=None, output_folder=None):
                 continue
             
             break
+
         except ValueError:
             print("Error: Please enter valid integer channel numbers.")
     
@@ -596,6 +600,41 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None):
                 
                 plt.xlabel('Energy (MeV)')
                 plt.ylabel('Counts')
+                
+                # Set x-axis to start from 0 MeV and show the full spectrum initially
+                plt.xlim(0, data_with_energy['Energy_MeV'].max())
+                
+                # Show the plot to help user determine a good max energy value
+                plt.title(f"{element_name} Radiation Spectrum (Initial View)")
+                plt.tight_layout()
+                plt.show()
+                
+                # Now ask for the maximum energy for the x-axis after showing the spectrum
+                print("\nAfter viewing the spectrum, you can now set a custom energy range.")
+                while True:
+                    try:
+                        max_energy = float(input("Enter the maximum energy (MeV) for the x-axis (or 0 to use the default): "))
+                        if max_energy < 0:
+                            print("Error: Maximum energy must be a non-negative number.")
+                            continue
+                        break
+                    except ValueError:
+                        print("Error: Please enter a valid number.")
+                
+                # Create the final plot with the fitted peak positions labeled in energy
+                plt.figure(figsize=(12, 6))
+                plt.bar(data_with_energy['Energy_MeV'], data['Counts'], width=(data_with_energy['Energy_MeV'].max() - data_with_energy['Energy_MeV'].min())/len(data_with_energy), 
+                       color='blue', alpha=0.7)
+                
+                plt.xlabel('Energy (MeV)')
+                plt.ylabel('Counts')
+                
+                # Set x-axis to start from 0 MeV and end at the user-specified energy
+                # If user entered 0, use the maximum energy in the data
+                if max_energy > 0:
+                    plt.xlim(0, max_energy)
+                else:
+                    plt.xlim(0, data_with_energy['Energy_MeV'].max())
                 
                 title = f"{element_name} Radiation Spectrum (Fitted Peaks)"
                 plt.title(title)

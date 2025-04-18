@@ -7,7 +7,7 @@ A Python tool for analyzing gamma radiation spectra, particularly useful for neu
 - Process multiple spectrum files in batch mode
 - Interactive peak selection with background subtraction
 - Gaussian curve fitting for accurate peak center determination
-- Comprehensive uncertainty estimation
+- Comprehensive uncertainty estimation using proper error propagation
 - Detailed visualization of spectra and fitted peaks
 - Summary of all peak positions across multiple isotopes
 - Automatic output organization
@@ -89,6 +89,25 @@ The tool generates:
 - matplotlib: Visualization
 - numpy: Numerical operations
 - scipy: Signal processing and curve fitting
+
+## Uncertainty Calculation
+
+The peak position uncertainty is calculated using proper error propagation methodology, combining independent error sources in quadrature:
+
+```
+final_err = sqrt(statistical_err² + background_variation_err² + channel_discretization_err²)
+```
+
+Where:
+- **Statistical error**: Formal uncertainty from the Gaussian fit covariance matrix
+- **Background variation error**: Standard deviation of peak positions from 5 simulations with ±5% random background variations
+- **Channel discretization error**: Fixed at 0.5 channels due to the inherent uncertainty in binned data
+
+This approach:
+1. Accounts for all significant error sources
+2. Follows standard error propagation principles for independent variables
+3. Provides a statistically valid estimate without overestimation
+4. Properly weights each error component by its significance
 
 ## Contributing
 
