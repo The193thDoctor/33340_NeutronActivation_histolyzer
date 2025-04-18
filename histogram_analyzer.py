@@ -162,7 +162,7 @@ def gaussian(x, a, mu, sigma, c):
     """Gaussian function with offset."""
     return a * np.exp(-(x - mu)**2 / (2 * sigma**2)) + c
 
-def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, element_name, peak_id=None, uncertainty_factor=1.0, output_folder=None):
+def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, element_name, peak_id=None, uncertainty_factor=3.0, output_folder=None):
     """
     Find peaks after subtracting linear background between two points,
     then fit a Gaussian to get more accurate peak position with standard uncertainty.
@@ -173,7 +173,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         end_ch: Ending channel for background subtraction
         element_name: Name of the element being analyzed
         peak_id: Optional identifier for distinguishing multiple peaks
-        uncertainty_factor: Factor to scale uncertainty estimates (default=1.0)
+        uncertainty_factor: Factor to scale uncertainty estimates (default=3.0)
         output_folder: Optional output folder path
     
     Returns:
@@ -225,7 +225,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         # Calculate parameter uncertainties from covariance matrix
         perr = np.sqrt(np.diag(pcov))
         
-        # Apply uncertainty scale factor (default is 1.0 for standard error)
+        # Apply uncertainty scale factor (default is 3.0 for standard error)
         perr = perr * uncertainty_factor
         
         # Calculate correlation matrix (using original covariance)
@@ -449,8 +449,8 @@ def process_peak(data, element_name, peak_id=None, output_folder=None):
         except ValueError:
             print("Error: Please enter valid integer channel numbers.")
     
-    # Always use standard 1-sigma uncertainty (no user prompt)
-    uncertainty_factor = 1.0
+    # Use 3-sigma uncertainty
+    uncertainty_factor = 3.0
     
     # Find peak with background subtraction and Gaussian fitting
     fit_results = find_peak_with_background_subtraction_and_fit(
