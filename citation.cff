@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Gamma Radiation Spectrum Analyzer"
+authors:
+  - family-names: "Tang"
+    given-names: "Letian"
+    affiliation: "Carnegie Mellon University"
+version: 1.0.0
+date-released: 2025-04-18
+repository-code: "https://github.com/yourusername/histogram_analyzer"
+license: MIT
+abstract: "A Python tool for analyzing gamma radiation spectra from neutron activation experiments. Processes CSV files containing radiation spectrum data, identifies peaks, and performs Gaussian fitting to accurately determine peak positions."
+keywords:
+  - gamma radiation
+  - spectroscopy
+  - neutron activation
+  - data analysis
+  - peak fitting
