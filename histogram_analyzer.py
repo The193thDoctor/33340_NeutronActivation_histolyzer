@@ -285,15 +285,15 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         # 3. Channel discretization error (half a channel)
         channel_err = 0.5
         
-        # Combine errors in quadrature (for independent error sources)
-        final_err = np.sqrt(perr[1]**2 + background_var_err**2 + channel_err**2)
+        # Combine all error sources - take the maximum
+        final_err = np.max([perr[1], width_based_err, background_var_err, channel_err])
         
         print(f"\nUncertainty Estimation Components:")
         print(f"Statistical (from fit): {perr[1]:.4f} channels")
-        print(f"Width-based (10% of sigma): {width_based_err:.4f} channels") 
+        print(f"Width-based (10% of sigma): {width_based_err:.4f} channels")
         print(f"Background variation: {background_var_err:.4f} channels")
         print(f"Channel discretization: {channel_err:.4f} channels")
-        print(f"Combined (quadrature): {final_err:.4f} channels")
+        print(f"Combined (max): {final_err:.4f} channels")
         
         # Plot the results
         plt.figure(figsize=(12, 12))
