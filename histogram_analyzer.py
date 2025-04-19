@@ -218,113 +218,143 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
     try:
         # Fit the Gaussian
         popt, pcov = curve_fit(gaussian, x_data, y_data, p0=p0)
-        
+
         # Extract parameters
         amplitude, mu, sigma, const = popt
-        
+
         # Calculate parameter uncertainties from covariance matrix
         perr = np.sqrt(np.diag(pcov))
-        
+
         # Apply uncertainty scale factor (default is 1.0 for standard error)
         perr = perr * uncertainty_factor
-        
+
         # Calculate correlation matrix (using original covariance)
         correlation = pcov / np.outer(np.sqrt(np.diag(pcov)), np.sqrt(np.diag(pcov)))
-        
+
         # Generate fitted curve
         y_fit = gaussian(x_data, *popt)
-        
+
         # Calculate residuals and chi-square
         residuals = y_data - y_fit
-        
+
         # Calculate Poisson-based uncertainties for each point
         # Standard error for count data is approximately sqrt(N)
         poisson_errors = np.sqrt(np.abs(y_fit))
-        
+
         # Use the larger of the Poisson error or the residual for each point
         # to account for both statistical and potential systematic uncertainties
         combined_errors = np.maximum(poisson_errors, np.abs(residuals))
-        
+
         # Recalculate chi-square with these conservative errors
         chi_square = np.sum((residuals / combined_errors)**2)
         dof = len(y_data) - len(popt)  # degrees of freedom
         reduced_chi_square = chi_square / dof
         p_value = 1 - stats.chi2.cdf(chi_square, dof)
-        
+
         # Calculate confidence interval for peak position (1-sigma)
         conf_interval = perr[1]
-        
+
         # Additional uncertainty estimation methods
-        
+
         # 1. Half width method - estimate uncertainty as percentage of peak width
         width_based_err = sigma * 0.1  # 10% of the peak width
-        
+
         # 2. Estimate from peak position variation with different background choices
         # Simulate by slightly varying the background points
         background_variations = []
+        # Using a fixed seed would defeat the randomness, so don't set one
         for i in range(5):
             # Vary background by random amounts within 5%
+            # Make sure we're generating new random values each time
             var_start = start_count * (1 + np.random.uniform(-0.05, 0.05))
             var_end = end_count * (1 + np.random.uniform(-0.05, 0.05))
-            
+
             # Recalculate background
             var_m = (var_end - var_start) / (end_ch - start_ch)
             var_b = var_start - var_m * start_ch
             var_background = var_m * channels + var_b
-            
+
             # Subtract new background
             var_subtracted = range_data['Counts'].values - var_background
-            
-            # Quick simple estimation of peak
+
+            # Find the approximate maximum to use as initial guess for Gaussian fit
             peak_idx = np.argmax(var_subtracted)
-            background_variations.append(channels[peak_idx])
-        
+            max_channel = channels[peak_idx]
+            max_subtracted = var_subtracted[peak_idx]
+
+            try:
+                # Use a window around the peak for fitting
+                window_size = min(int((end_ch - start_ch) / 4), 20)  # Use a reasonable window size
+                window_size = max(window_size, 5)  # At least 5 points
+
+                # Ensure the window is within bounds
+                lower_idx = max(0, peak_idx - window_size)
+                upper_idx = min(len(channels) - 1, peak_idx + window_size)
+
+                # Get the data for fitting
+                x_fit = channels[lower_idx:upper_idx+1]
+                y_fit = var_subtracted[lower_idx:upper_idx+1]
+
+                # Initial parameter guesses [amplitude, mean, sigma, constant]
+                width_guess = (end_ch - start_ch) / 10
+                p0 = [max_subtracted, max_channel, width_guess, 0]
+
+                # Fit the Gaussian
+                popt, _ = curve_fit(gaussian, x_fit, y_fit, p0=p0)
+
+                # Extract the peak center (mu parameter)
+                refined_peak = popt[1]
+                background_variations.append(refined_peak)
+            except:
+                # Fallback if fit fails - just use the simple maximum
+                background_variations.append(max_channel)
+
         # Calculate standard deviation of peak positions from background variations
         background_var_err = np.std(background_variations)
-        
+
         # 3. Channel discretization error (half a channel)
         channel_err = 0.5
-        
+
         # Combine errors in quadrature (for independent error sources)
         final_err = np.sqrt(perr[1]**2 + background_var_err**2 + channel_err**2)
-        
+
         print(f"\nUncertainty Estimation Components:")
         print(f"Statistical (from fit): {perr[1]:.4f} channels")
-        print(f"Width-based (10% of sigma): {width_based_err:.4f} channels") 
+        print(f"Width-based (10% of sigma): {width_based_err:.4f} channels")
         print(f"Background variation: {background_var_err:.4f} channels")
         print(f"Channel discretization: {channel_err:.4f} channels")
         print(f"Combined (quadrature): {final_err:.4f} channels")
-        
+
         # Plot the results
         plt.figure(figsize=(12, 12))
-        
+
         # Plot 1: Original data with linear background
         plt.subplot(311)
-        plt.bar(range_data['Channel'], range_data['Counts'], width=1.0, 
+        plt.bar(range_data['Channel'], range_data['Counts'], width=1.0,
                 color='blue', alpha=0.7, label='Original Data')
-        plt.plot(range_data['Channel'], range_data['Background'], 'r-', 
+        plt.plot(range_data['Channel'], range_data['Background'], 'r-',
                 linewidth=2, label='Linear Background')
         plt.xlabel('Channel')
         plt.ylabel('Counts')
-        
+
         # Use peak_id in title if provided
         peak_title = f"{element_name}"
         if peak_id:
             peak_title = f"{element_name} Peak {peak_id}"
-            
+
         plt.title(f'{peak_title} Spectrum with Linear Background')
         plt.legend()
         plt.grid(True, alpha=0.3)
-        
+
         # Plot 2: Background-subtracted data with Gaussian fit
         plt.subplot(312)
-        plt.bar(range_data['Channel'], range_data['Subtracted'], width=1.0, 
+        plt.bar(range_data['Channel'], range_data['Subtracted'], width=1.0,
                 color='green', alpha=0.7, label='Background Subtracted')
-        plt.plot(x_data, y_fit, 'r-', linewidth=2, 
+        plt.plot(x_data, y_fit, 'r-', linewidth=2,
                 label=f'Gaussian Fit (μ={mu:.2f}±{final_err:.2f})')
-        
+
         # Add shaded region to indicate uncertainty
-        plt.axvspan(mu - final_err, mu + final_err, 
+        plt.axvspan(mu - final_err, mu + final_err,
                    alpha=0.2, color='red', label='1σ Confidence')
         plt.axvline(x=mu, color='k', linestyle='--')
         plt.xlabel('Channel')
@@ -332,11 +362,11 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         plt.title(f'{peak_title} Peak with Gaussian Fit & Uncertainty')
         plt.legend()
         plt.grid(True, alpha=0.3)
-        
+
         # Plot 3: Residuals
         plt.subplot(313)
         plt.bar(x_data, residuals, width=1.0, color='purple', alpha=0.7)
-        plt.fill_between(x_data, -combined_errors, combined_errors, color='gray', alpha=0.3, 
+        plt.fill_between(x_data, -combined_errors, combined_errors, color='gray', alpha=0.3,
                          label='Estimated Error Band')
         plt.axhline(y=0, color='k', linestyle='-')
         plt.xlabel('Channel')
@@ -344,27 +374,27 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         plt.title(f'{peak_title} Fit Residuals')
         plt.legend()
         plt.grid(True, alpha=0.3)
-        
+
         # Generate filename based on element name and peak ID
         plt.tight_layout()
-        
+
         # Save to output folder if specified
         filename = f'{file_prefix}_gaussian_fit.png'
         if output_folder:
             output_path = os.path.join(output_folder, filename)
         else:
             output_path = filename
-            
+
         plt.savefig(output_path, dpi=300)
         plt.show()
-        
+
         print(f"Gaussian fit plot saved to: {output_path}")
-        
+
         # Print detailed statistical information
         print(f"\nDetailed Analysis for {peak_title}:")
         print(f"Peak Center: {mu:.4f} ± {final_err:.4f} channels (1σ)")
         print(f"FWHM: {2.355 * sigma:.4f} ± {2.355 * perr[2]:.4f} channels")
-        
+
         # Return fit results
         fit_results = {
             'element': element_name,
@@ -389,7 +419,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
             'background_var_err': background_var_err,
             'channel_err': channel_err
         }
-        
+
         return fit_results
         
     except Exception as e:
