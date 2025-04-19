@@ -256,10 +256,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
 
         # Additional uncertainty estimation methods
 
-        # 1. Half width method - estimate uncertainty as percentage of peak width
-        width_based_err = sigma * 0.1  # 10% of the peak width
-
-        # 2. Estimate from peak position variation by varying window size
+        # Estimate from peak position variation by varying window size
         # Vary the left and right window points by a random amount within 5% of the window size
         window_variations = []
         window_size = end_ch - start_ch
@@ -271,15 +268,12 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
             var_window_left = max(0, start_ch + int(np.random.uniform(-0.05, 0.05) * window_size))
             var_window_right = min(max(channels), end_ch + int(np.random.uniform(-0.05, 0.05) * window_size))
             
-            print(f"DEBUG: Variation {i+1}: Original window = [{start_ch}, {end_ch}], Varied window = [{var_window_left}, {var_window_right}]")
-            
             # Create a mask for the varied window
             var_mask = (range_data['Channel'] >= var_window_left) & (range_data['Channel'] <= var_window_right)
             var_range_data = range_data[var_mask].copy()
             
             # Skip if we don't have enough data points
             if len(var_range_data) < 10:
-                print(f"DEBUG: Skipping variation {i+1} - not enough data points ({len(var_range_data)})")
                 continue
                 
             var_channels = var_range_data['Channel'].values
@@ -314,16 +308,14 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
                 # Extract the peak center (mu parameter)
                 var_refined_peak = var_popt[1]
                 window_variations.append(var_refined_peak)
-                print(f"DEBUG: Variation {i+1} fit successful, refined_peak={var_refined_peak}")
-            except Exception as e:
+            except Exception:
                 # Fallback if fit fails - just use the simple maximum
                 window_variations.append(var_max_channel)
-                print(f"DEBUG: Variation {i+1} fit failed: {e}, using max_channel={var_max_channel}")
 
         # Calculate standard deviation of peak positions from window variations
         window_var_err = np.std(window_variations) if window_variations else sigma * 0.05  # default fallback
 
-        # 3. Channel discretization error (half a channel)
+        # Channel discretization error (half a channel)
         channel_err = 0.5
 
         # Combine errors in quadrature (for independent error sources)
@@ -331,7 +323,6 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
 
         print(f"\nUncertainty Estimation Components:")
         print(f"Statistical (from fit): {perr[1]:.4f} channels")
-        print(f"Width-based (10% of sigma): {width_based_err:.4f} channels")
         print(f"Window variation: {window_var_err:.4f} channels")
         print(f"Channel discretization: {channel_err:.4f} channels")
         print(f"Combined (quadrature): {final_err:.4f} channels")
@@ -384,7 +375,6 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         
         # Ensure x_data and residuals have the same length
         if len(x_data) != len(residuals):
-            print(f"WARNING: x_data length ({len(x_data)}) != residuals length ({len(residuals)})")
             # Use channel numbers as x-axis instead
             plt.bar(range(len(residuals)), residuals, width=1.0, color='purple', alpha=0.7)
             plt.fill_between(range(len(residuals)), -combined_errors, combined_errors, color='gray', alpha=0.3,
@@ -443,7 +433,6 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
             'correlation_matrix': correlation,
             'residuals': residuals,
             'stat_err': perr[1],
-            'width_based_err': width_based_err,
             'window_var_err': window_var_err,
             'channel_err': channel_err
         }

@@ -92,22 +92,26 @@ The tool generates:
 
 ## Uncertainty Calculation
 
-The peak position uncertainty is calculated using proper error propagation methodology, combining independent error sources in quadrature:
+The peak position uncertainty is determined by combining three independent error sources using standard error propagation methodology. The final uncertainty is calculated by adding these three terms in quadrature:
 
 ```
-final_err = sqrt(statistical_err² + background_variation_err² + channel_discretization_err²)
+final_err = sqrt(statistical_err² + window_variation_err² + channel_discretization_err²)
 ```
 
-Where:
-- **Statistical error**: Formal uncertainty from the Gaussian fit covariance matrix
-- **Background variation error**: Standard deviation of peak positions from 5 simulations with ±5% random background variations
-- **Channel discretization error**: Fixed at 0.5 channels due to the inherent uncertainty in binned data
+The three error components are:
 
-This approach:
-1. Accounts for all significant error sources
-2. Follows standard error propagation principles for independent variables
-3. Provides a statistically valid estimate without overestimation
-4. Properly weights each error component by its significance
+1. **Statistical error**: The formal uncertainty derived from the covariance matrix of the Gaussian fit. This represents the statistical uncertainty inherent in fitting a mathematical model to experimental data.
+
+2. **Window variation error**: This error is calculated by varying the selection window endpoints by ±5% of the window size and performing 5 independent Gaussian fits. The standard deviation of these peak positions provides an estimate of how sensitive the measurement is to the specific window selection.
+
+3. **Channel discretization error**: A fixed value of 0.5 channels that accounts for the inherent uncertainty due to the discrete nature of the channel data. Since data is binned into integer channels, there is a minimum positional uncertainty of half a channel width.
+
+By combining these three error sources, we obtain a comprehensive uncertainty estimate that accounts for:
+- The statistical uncertainty of the fitting process
+- The systematic effects of window selection
+- The inherent limitations of discretized data
+
+This approach follows standard error propagation principles for independent variables and ensures that all significant sources of uncertainty are properly accounted for in the final result.
 
 ## Contributing
 
