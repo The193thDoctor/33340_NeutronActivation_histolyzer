@@ -255,7 +255,10 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         conf_interval = perr[1]
 
         # Additional uncertainty estimation methods
-
+        
+        # Width-based estimate - 10% of the peak width as a simple heuristic
+        width_based_err = sigma * 0.1  # 10% of the peak width
+        
         # Estimate from peak position variation by varying window size
         # Vary the left and right window points by a random amount within 5% of the window size
         window_variations = []
@@ -319,13 +322,18 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         channel_err = 0.5
 
         # Combine errors in quadrature (for independent error sources)
-        final_err = np.sqrt(perr[1]**2 + window_var_err**2 + channel_err**2)
+        combined_err = np.sqrt(perr[1]**2 + window_var_err**2 + channel_err**2)
+        
+        # Use the maximum of the combined error and the width-based error
+        final_err = max(combined_err, width_based_err)
 
         print(f"\nUncertainty Estimation Components:")
         print(f"Statistical (from fit): {perr[1]:.4f} channels")
         print(f"Window variation: {window_var_err:.4f} channels")
         print(f"Channel discretization: {channel_err:.4f} channels")
-        print(f"Combined (quadrature): {final_err:.4f} channels")
+        print(f"Width-based (10% of sigma): {width_based_err:.4f} channels")
+        print(f"Combined (quadrature): {combined_err:.4f} channels")
+        print(f"Final uncertainty (max): {final_err:.4f} channels")
 
         # Plot the results
         plt.figure(figsize=(12, 12))
@@ -434,7 +442,9 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
             'residuals': residuals,
             'stat_err': perr[1],
             'window_var_err': window_var_err,
-            'channel_err': channel_err
+            'channel_err': channel_err,
+            'width_based_err': width_based_err,
+            'combined_err': combined_err
         }
 
         return fit_results

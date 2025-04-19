@@ -92,13 +92,19 @@ The tool generates:
 
 ## Uncertainty Calculation
 
-The peak position uncertainty is determined by combining three independent error sources using standard error propagation methodology. The final uncertainty is calculated by adding these three terms in quadrature:
+The peak position uncertainty is determined using multiple independent error sources. The calculation involves these steps:
 
+1. Calculate individual error components
+2. Combine the first three components in quadrature to get a combined error
+3. Take the maximum of this combined error and a width-based estimate
+
+The final formula is:
 ```
-final_err = sqrt(statistical_err² + window_variation_err² + channel_discretization_err²)
+combined_err = sqrt(statistical_err² + window_variation_err² + channel_discretization_err²)
+final_err = max(combined_err, width_based_err)
 ```
 
-The three error components are:
+The four error components are:
 
 1. **Statistical error**: The formal uncertainty derived from the covariance matrix of the Gaussian fit. This represents the statistical uncertainty inherent in fitting a mathematical model to experimental data.
 
@@ -106,12 +112,28 @@ The three error components are:
 
 3. **Channel discretization error**: A fixed value of 0.5 channels that accounts for the inherent uncertainty due to the discrete nature of the channel data. Since data is binned into integer channels, there is a minimum positional uncertainty of half a channel width.
 
-By combining these three error sources, we obtain a comprehensive uncertainty estimate that accounts for:
-- The statistical uncertainty of the fitting process
-- The systematic effects of window selection
-- The inherent limitations of discretized data
+4. **Width-based error**: A simple heuristic estimate calculated as 10% of the peak width (sigma). This provides a fallback that scales with the width of the peak.
 
-This approach follows standard error propagation principles for independent variables and ensures that all significant sources of uncertainty are properly accounted for in the final result.
+> **⚠️ IMPORTANT NOTE ON UNCERTAINTY ESTIMATION ⚠️**
+>
+> **The uncertainty calculation implemented here is a relatively crude estimate and may need adjustment for your specific experimental conditions. Users are encouraged to customize the uncertainty calculation by:**
+>
+> **- Applying different scaling factors to individual error components**
+> **- Changing the window variation ratio (currently set at ±5%)**
+> **- Using different combination methods (maximum, quadrature sum, linear sum)**
+> **- Adding additional error terms specific to your experimental setup**
+>
+> <span style="color:red">**USERS ARE STRONGLY ENCOURAGED TO EXPERIMENT WITH THESE METHODS TO FIND THE BEST APPROACH FOR THEIR SPECIFIC DATA AND EXPERIMENTAL NEEDS!**</span>
+>
+> **Uncertainty estimation is inherently experimental-dependent, and the method implemented here should be considered a starting point rather than a definitive solution.**
+
+By using the maximum of the combined statistical error and the width-based estimate, we ensure a comprehensive uncertainty value that:
+- Accounts for all significant error sources
+- Scales appropriately with peak width
+- Follows standard error propagation principles
+- Never underestimates the true uncertainty
+
+This approach provides a reasonable baseline for uncertainty estimation in typical neutron activation analysis experiments.
 
 ## Contributing
 
