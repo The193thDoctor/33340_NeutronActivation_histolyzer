@@ -259,69 +259,80 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         # 1. Half width method - estimate uncertainty as percentage of peak width
         width_based_err = sigma * 0.1  # 10% of the peak width
 
-        # 2. Estimate from peak position variation with different background choices
-        # Simulate by slightly varying the background points
-        background_variations = []
+        # 2. Estimate from peak position variation by varying window size
+        # Vary the left and right window points by a random amount within 5% of the window size
+        window_variations = []
+        window_size = end_ch - start_ch
+        
         # Using a fixed seed would defeat the randomness, so don't set one
         for i in range(5):
-            # Vary background by random amounts within 5%
+            # Vary window endpoints by random amounts within 5% of window size
             # Make sure we're generating new random values each time
-            var_start = start_count * (1 + np.random.uniform(-0.05, 0.05))
-            var_end = end_count * (1 + np.random.uniform(-0.05, 0.05))
-
-            # Recalculate background
-            var_m = (var_end - var_start) / (end_ch - start_ch)
-            var_b = var_start - var_m * start_ch
-            var_background = var_m * channels + var_b
+            var_window_left = max(0, start_ch + int(np.random.uniform(-0.05, 0.05) * window_size))
+            var_window_right = min(max(channels), end_ch + int(np.random.uniform(-0.05, 0.05) * window_size))
+            
+            print(f"DEBUG: Variation {i+1}: Original window = [{start_ch}, {end_ch}], Varied window = [{var_window_left}, {var_window_right}]")
+            
+            # Create a mask for the varied window
+            var_mask = (range_data['Channel'] >= var_window_left) & (range_data['Channel'] <= var_window_right)
+            var_range_data = range_data[var_mask].copy()
+            
+            # Skip if we don't have enough data points
+            if len(var_range_data) < 10:
+                print(f"DEBUG: Skipping variation {i+1} - not enough data points ({len(var_range_data)})")
+                continue
+                
+            var_channels = var_range_data['Channel'].values
+            
+            # Calculate linear background using the varied window endpoints
+            var_start_count = data.loc[data['Channel'] == var_window_left, 'Counts'].values[0]
+            var_end_count = data.loc[data['Channel'] == var_window_right, 'Counts'].values[0]
+            
+            var_m = (var_end_count - var_start_count) / (var_window_right - var_window_left)
+            var_b = var_start_count - var_m * var_window_left
+            var_background = var_m * var_channels + var_b
 
             # Subtract new background
-            var_subtracted = range_data['Counts'].values - var_background
+            var_subtracted = var_range_data['Counts'].values - var_background
 
             # Find the approximate maximum to use as initial guess for Gaussian fit
-            peak_idx = np.argmax(var_subtracted)
-            max_channel = channels[peak_idx]
-            max_subtracted = var_subtracted[peak_idx]
+            var_peak_idx = np.argmax(var_subtracted)
+            var_max_channel = var_channels[var_peak_idx]
+            var_max_subtracted = var_subtracted[var_peak_idx]
 
             try:
-                # Use a window around the peak for fitting
-                window_size = min(int((end_ch - start_ch) / 4), 20)  # Use a reasonable window size
-                window_size = max(window_size, 5)  # At least 5 points
-
-                # Ensure the window is within bounds
-                lower_idx = max(0, peak_idx - window_size)
-                upper_idx = min(len(channels) - 1, peak_idx + window_size)
-
-                # Get the data for fitting
-                x_fit = channels[lower_idx:upper_idx+1]
-                y_fit = var_subtracted[lower_idx:upper_idx+1]
-
                 # Initial parameter guesses [amplitude, mean, sigma, constant]
-                width_guess = (end_ch - start_ch) / 10
-                p0 = [max_subtracted, max_channel, width_guess, 0]
+                var_width_guess = (var_window_right - var_window_left) / 10
+                var_p0 = [var_max_subtracted, var_max_channel, var_width_guess, 0]
 
-                # Fit the Gaussian
-                popt, _ = curve_fit(gaussian, x_fit, y_fit, p0=p0)
+                # Fit the Gaussian - using all data in the varied window
+                var_x_data = var_channels
+                var_y_data = var_subtracted
+                
+                var_popt, _ = curve_fit(gaussian, var_x_data, var_y_data, p0=var_p0)
 
                 # Extract the peak center (mu parameter)
-                refined_peak = popt[1]
-                background_variations.append(refined_peak)
-            except:
+                var_refined_peak = var_popt[1]
+                window_variations.append(var_refined_peak)
+                print(f"DEBUG: Variation {i+1} fit successful, refined_peak={var_refined_peak}")
+            except Exception as e:
                 # Fallback if fit fails - just use the simple maximum
-                background_variations.append(max_channel)
+                window_variations.append(var_max_channel)
+                print(f"DEBUG: Variation {i+1} fit failed: {e}, using max_channel={var_max_channel}")
 
-        # Calculate standard deviation of peak positions from background variations
-        background_var_err = np.std(background_variations)
+        # Calculate standard deviation of peak positions from window variations
+        window_var_err = np.std(window_variations) if window_variations else sigma * 0.05  # default fallback
 
         # 3. Channel discretization error (half a channel)
         channel_err = 0.5
 
         # Combine errors in quadrature (for independent error sources)
-        final_err = np.sqrt(perr[1]**2 + background_var_err**2 + channel_err**2)
+        final_err = np.sqrt(perr[1]**2 + window_var_err**2 + channel_err**2)
 
         print(f"\nUncertainty Estimation Components:")
         print(f"Statistical (from fit): {perr[1]:.4f} channels")
         print(f"Width-based (10% of sigma): {width_based_err:.4f} channels")
-        print(f"Background variation: {background_var_err:.4f} channels")
+        print(f"Window variation: {window_var_err:.4f} channels")
         print(f"Channel discretization: {channel_err:.4f} channels")
         print(f"Combined (quadrature): {final_err:.4f} channels")
 
@@ -350,7 +361,12 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         plt.subplot(312)
         plt.bar(range_data['Channel'], range_data['Subtracted'], width=1.0,
                 color='green', alpha=0.7, label='Background Subtracted')
-        plt.plot(x_data, y_fit, 'r-', linewidth=2,
+                
+        # Generate a smooth curve for plotting using dense points
+        x_dense = np.linspace(min(x_data), max(x_data), 500)
+        y_dense = gaussian(x_dense, *popt)
+                
+        plt.plot(x_dense, y_dense, 'r-', linewidth=2,
                 label=f'Gaussian Fit (μ={mu:.2f}±{final_err:.2f})')
 
         # Add shaded region to indicate uncertainty
@@ -365,9 +381,21 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
 
         # Plot 3: Residuals
         plt.subplot(313)
-        plt.bar(x_data, residuals, width=1.0, color='purple', alpha=0.7)
-        plt.fill_between(x_data, -combined_errors, combined_errors, color='gray', alpha=0.3,
-                         label='Estimated Error Band')
+        
+        # Ensure x_data and residuals have the same length
+        if len(x_data) != len(residuals):
+            print(f"WARNING: x_data length ({len(x_data)}) != residuals length ({len(residuals)})")
+            # Use channel numbers as x-axis instead
+            plt.bar(range(len(residuals)), residuals, width=1.0, color='purple', alpha=0.7)
+            plt.fill_between(range(len(residuals)), -combined_errors, combined_errors, color='gray', alpha=0.3,
+                             label='Estimated Error Band')
+            # Set x-axis to match the original channel range
+            plt.xlim(0, len(residuals)-1)
+            plt.xticks([])  # Hide x ticks as they don't directly correspond to channels
+        else:
+            plt.bar(x_data, residuals, width=1.0, color='purple', alpha=0.7)
+            plt.fill_between(x_data, -combined_errors, combined_errors, color='gray', alpha=0.3,
+                             label='Estimated Error Band')
         plt.axhline(y=0, color='k', linestyle='-')
         plt.xlabel('Channel')
         plt.ylabel('Residuals (Data - Fit)')
@@ -416,7 +444,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
             'residuals': residuals,
             'stat_err': perr[1],
             'width_based_err': width_based_err,
-            'background_var_err': background_var_err,
+            'window_var_err': window_var_err,
             'channel_err': channel_err
         }
 
