@@ -124,11 +124,21 @@ def plot_histogram(data, element_name, title=None, file_prefix=None, output_fold
     
     # If peak_labels is provided, use those for labeling
     if peak_labels:
-        for channel, label in peak_labels:
+        # Try to use peak_heights if provided as a parameter
+        peak_heights = getattr(data, 'peak_heights', None)
+        
+        for i, (channel, label) in enumerate(peak_labels):
+            # If we have peak heights data, use it
+            if isinstance(peak_heights, dict) and str(i) in peak_heights:
+                label_height = peak_heights[str(i)]
+                # Ensure label is visible
+                label_height = max(label_height, data['Counts'].max() * 0.25)
+            else:
+                # Fallback to actual count or 90% of max
+                label_height = data.loc[data['Channel'] == channel, 'Counts'].values[0] if channel in data['Channel'].values else data['Counts'].max() * 0.9
+            
             plt.annotate(label,
-                         xy=(channel, data.loc[data['Channel'] == channel, 'Counts'].values[0] 
-                             if channel in data['Channel'].values 
-                             else data['Counts'].max() * 0.9),
+                         xy=(channel, label_height),
                          xytext=(0, 10),
                          textcoords='offset points',
                          ha='center')
@@ -421,6 +431,10 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         print(f"Peak Center: {mu:.4f} ± {final_err:.4f} channels (1σ)")
         print(f"FWHM: {2.355 * sigma:.4f} ± {2.355 * perr[2]:.4f} channels")
 
+        # Calculate total peak height (amplitude + background at peak center)
+        # Background at peak center using m and b from earlier linear interpolation
+        peak_height = amplitude + (m * mu + b)
+        
         # Return fit results
         fit_results = {
             'element': element_name,
@@ -433,6 +447,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
             'amplitude_err': perr[0],
             'constant': const,
             'constant_err': perr[3],
+            'peak_height': peak_height,  # Total height including background
             'fwhm': 2.355 * sigma,  # FWHM = 2.355 * sigma for Gaussian
             'fwhm_err': 2.355 * perr[2],
             'chi_square': chi_square,
@@ -452,13 +467,17 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
     except Exception as e:
         print(f"Error in Gaussian fitting: {e}")
         # If fitting fails, return the simple maximum with a generous uncertainty
+        # Calculate total peak height (raw subtracted value + background at that position)
+        peak_height = max_subtracted + (m * max_channel + b)
+        
         return {
             'element': element_name,
             'peak_id': peak_id,
             'center': max_channel,
             'center_err': (end_ch - start_ch) / 10,  # Conservative fallback
             'amplitude': max_subtracted,
-            'amplitude_err': np.sqrt(max_subtracted) * 2  # Poisson error × 2
+            'amplitude_err': np.sqrt(max_subtracted) * 2,  # Poisson error × 2
+            'peak_height': peak_height
         }
 
 def process_peak(data, element_name, peak_id=None, output_folder=None):
@@ -699,12 +718,24 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None):
                 plt.grid(True, alpha=0.3)
                 
                 # Add peak labels
-                for channel, label in peak_labels:
+                for i, (channel, label) in enumerate(peak_labels):
                     energy_value = (channel - a) / b
+                    
+                    # Get the peak_id (key in all_results dictionary)
+                    peak_key = f"{i+1}" if num_peaks > 1 else 'main'
+                    fit_result = all_results.get(peak_key, {})
+                    
+                    # Use fitted peak height if available
+                    if 'peak_height' in fit_result:
+                        label_height = fit_result['peak_height']
+                        # For very small peaks, ensure the label is visible
+                        label_height = max(label_height, data['Counts'].max() * 0.25)
+                    else:
+                        # Fallback to actual count or 90% of max
+                        label_height = data.loc[data['Channel'] == channel, 'Counts'].values[0] if channel in data['Channel'].values else data['Counts'].max() * 0.9
+                    
                     plt.annotate(label,
-                                 xy=(energy_value, data.loc[data['Channel'] == channel, 'Counts'].values[0] 
-                                     if channel in data['Channel'].values 
-                                     else data['Counts'].max() * 0.9),
+                                 xy=(energy_value, label_height),
                                  xytext=(0, 10),
                                  textcoords='offset points',
                                  ha='center')
@@ -732,11 +763,24 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None):
             else:
                 # Create labels for each peak in channel units
                 peak_labels = []
+                
+                # Also collect peak heights
+                peak_heights = {}
+                
                 for i, (loc, err) in enumerate(zip(peak_locations, peak_uncertainties)):
                     peak_label = f"Ch: {loc:.1f}±{err:.1f}"
                     # Find the closest channel in the data
                     closest_channel = int(round(loc))
                     peak_labels.append((closest_channel, peak_label))
+                    
+                    # Store the peak height from fit results
+                    peak_key = f"{i+1}" if num_peaks > 1 else 'main'
+                    fit_result = all_results.get(peak_key, {})
+                    if 'peak_height' in fit_result:
+                        peak_heights[str(i)] = fit_result['peak_height']
+                
+                # Add peak heights to data for use in plotting
+                data.peak_heights = peak_heights
                 
                 # Create a new plot with the fitted peak positions labeled
                 title = f"{element_name} Radiation Spectrum (Fitted Peaks)"
