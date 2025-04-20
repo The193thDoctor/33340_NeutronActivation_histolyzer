@@ -325,7 +325,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         
         # Add shaded region to indicate uncertainty
         plt.axvspan(mu - final_err, mu + final_err, 
-                   alpha=0.2, color='red', label='1σ Confidence')
+                   alpha=0.2, color='red', label='Peak Uncertainty Interval')
         plt.axvline(x=mu, color='k', linestyle='--')
         plt.xlabel('Channel')
         plt.ylabel('Counts (Background Subtracted)')
