@@ -384,7 +384,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         plt.axvline(x=mu, color='k', linestyle='--')
         plt.xlabel('Channel')
         plt.ylabel('Counts (Background Subtracted)')
-        plt.title(f'{peak_title} Peak with Gaussian Fit & Uncertainty')
+        plt.title(f'{peak_title} with Gaussian Fit & Uncertainty')
         plt.legend()
         plt.grid(True, alpha=0.3)
 
@@ -648,7 +648,7 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None):
                     # For function E = (C-a)/b, the uncertainty is:
                     # σ_E^2 = (∂E/∂C)^2 * σ_C^2 + (∂E/∂a)^2 * σ_a^2 + (∂E/∂b)^2 * σ_b^2
                     # where ∂E/∂C = 1/b, ∂E/∂a = -1/b, ∂E/∂b = -(C-a)/b^2
-                    
+
                     dE_dC = 1/b
                     dE_da = -1/b
                     dE_db = -(loc-a)/(b**2)
