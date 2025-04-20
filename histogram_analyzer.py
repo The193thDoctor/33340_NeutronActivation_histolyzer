@@ -329,7 +329,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         plt.axvline(x=mu, color='k', linestyle='--')
         plt.xlabel('Channel')
         plt.ylabel('Counts (Background Subtracted)')
-        plt.title(f'{peak_title} Peak with Gaussian Fit & Uncertainty')
+        plt.title(f'{peak_title} with Gaussian Fit & Uncertainty')
         plt.legend()
         plt.grid(True, alpha=0.3)
         
