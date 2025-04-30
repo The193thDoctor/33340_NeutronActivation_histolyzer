@@ -419,11 +419,6 @@ def save_user_input(input_data, element_name, output_folder=None):
     Returns:
         Path to the saved file
     """
-    # Skip if input_data is None
-    if input_data is None:
-        print("Warning: No input data to save")
-        return None
-        
     # Add timestamp
     input_data['timestamp'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -462,7 +457,7 @@ def load_user_input_from_file(filepath):
         print(f"Error loading input file: {e}")
         return None
 
-def process_peak(data, element_name, peak_id=None, output_folder=None, input_data=None):
+def process_peak(data, element_name, peak_id=None, output_folder=None, input_data={}):
     """
     Process a single peak with user input for channel selection.
     
@@ -487,7 +482,7 @@ def process_peak(data, element_name, peak_id=None, output_folder=None, input_dat
     input_key = f"{element_name}_peak{peak_id}" if peak_id else element_name
     
     # Check if we have pre-loaded input data for this peak
-    if input_data is not None and input_key in input_data:
+    if input_key in input_data:
         print(f"Using pre-loaded input data for {peak_title}")
         start_ch = input_data[input_key]['start_ch']
         end_ch = input_data[input_key]['end_ch']
@@ -518,12 +513,11 @@ def process_peak(data, element_name, peak_id=None, output_folder=None, input_dat
             except ValueError:
                 print("Error: Please enter valid integer channel numbers.")
         
-        # Save this input if we're collecting user inputs
-        if input_data is not None:
-            input_data[input_key] = {
-                'start_ch': start_ch,
-                'end_ch': end_ch
-            }
+        # Save this input to the user inputs dictionary
+        input_data[input_key] = {
+            'start_ch': start_ch,
+            'end_ch': end_ch
+        }
     
     # Use 3-sigma uncertainty
     uncertainty_factor = 3.0
@@ -558,7 +552,7 @@ def process_peak(data, element_name, peak_id=None, output_folder=None, input_dat
     
     return fit_results
 
-def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, input_data=None):
+def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, input_data={}):
     """
     Process multiple peaks for a single isotope.
     
@@ -571,24 +565,21 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
     Returns:
         Dictionary containing peak results and additional information
     """
-    # Create input data dictionary if not provided
-    if input_data is None:
-        input_data = {}
+    # Input data is now always a dictionary, so just use it directly
     
-    # Store element name if input_data exists
-    if input_data is not None:
-        input_data['element_name'] = element_name
-        
-        # Store output folder
-        if output_folder:
-            input_data['output_folder'] = output_folder
+    # Store element name
+    input_data['element_name'] = element_name
+    
+    # Store output folder
+    if output_folder:
+        input_data['output_folder'] = output_folder
     
     # Plot the initial spectrum without peak labels
     title = f"{element_name} Radiation Spectrum"
     plot_histogram(data, element_name, title=title, output_folder=output_folder)
     
     # Check if number of peaks is in the input data
-    if input_data is not None and 'num_peaks' in input_data:
+    if 'num_peaks' in input_data:
         num_peaks = input_data['num_peaks']
         print(f"\nUsing pre-loaded number of peaks: {num_peaks}")
     else:
@@ -604,8 +595,7 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
                 print("Error: Please enter a valid integer.")
         
         # Save number of peaks to input data
-        if input_data is not None:
-            input_data['num_peaks'] = num_peaks
+        input_data['num_peaks'] = num_peaks
     
     # Process each peak
     all_results = {}
@@ -625,14 +615,13 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
     # Ask if user wants to create a labeled spectrum with the fitted peak positions
     if peak_locations:
         # Check if label_peaks preference is in input data
-        if input_data is not None and 'label_peaks' in input_data:
+        if 'label_peaks' in input_data:
             label_peaks = input_data['label_peaks']
             print(f"\nUsing pre-loaded preference for labeled peaks: {'Yes' if label_peaks else 'No'}")
         else:
             label_peaks = input("\nDo you want to create a spectrum with labeled peak positions? (y/n): ").lower().startswith('y')
-            # Save preference to input data if input_data exists
-            if input_data is not None:
-                input_data['label_peaks'] = label_peaks
+            # Save preference to input data
+            input_data['label_peaks'] = label_peaks
         
         if label_peaks:
             # Check if energy conversion is in the input data
@@ -642,7 +631,7 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
             a_err = None
             b_err = None
             
-            if input_data is not None and 'energy_conversion' in input_data:
+            if 'energy_conversion' in input_data:
                 use_energy = True
                 energy_conversion = input_data['energy_conversion']
                 a = energy_conversion['a']
@@ -673,14 +662,13 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
                         except ValueError:
                             print("Error: Please enter valid numbers.")
                     
-                    # Save energy conversion parameters if input_data exists
-                    if input_data is not None:
-                        input_data['energy_conversion'] = {
-                            'a': a,
-                            'a_err': a_err,
-                            'b': b,
-                            'b_err': b_err
-                        }
+                    # Save energy conversion parameters
+                    input_data['energy_conversion'] = {
+                        'a': a,
+                        'a_err': a_err,
+                        'b': b,
+                        'b_err': b_err
+                    }
             
             if use_energy:
                 # Create a copy of the data with energy axis
@@ -738,7 +726,7 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
                 plt.show()
                 
                 # Check if max_energy is in the input data
-                if input_data is not None and 'max_energy' in input_data:
+                if 'max_energy' in input_data:
                     max_energy = input_data['max_energy']
                     print(f"\nUsing pre-loaded maximum energy: {max_energy} MeV")
                 else:
@@ -754,9 +742,8 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
                         except ValueError:
                             print("Error: Please enter a valid number.")
                     
-                    # Save max_energy to input data if input_data exists
-                    if input_data is not None:
-                        input_data['max_energy'] = max_energy
+                    # Save max_energy to input data
+                    input_data['max_energy'] = max_energy
                 
                 # Create the final plot with the fitted peak positions labeled in energy
                 plt.figure(figsize=(12, 6))
@@ -825,8 +812,7 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
                               output_folder=output_folder, peak_labels=peak_labels)
     
     # Save user inputs at the end, after all inputs have been collected
-    if input_data is not None:
-        save_user_input(input_data, element_name, output_folder)
+    save_user_input(input_data, element_name, output_folder)
     
     # Return all the results as well as peaks information
     return {
@@ -870,7 +856,7 @@ def list_csv_files(folder_path):
     
     return csv_files
 
-def process_multiple_isotopes(input_data=None):
+def process_multiple_isotopes(input_data={}):
     """
     Process multiple isotopes, each with potentially multiple peaks.
     
@@ -883,37 +869,33 @@ def process_multiple_isotopes(input_data=None):
     all_isotope_results = {}
     output_folder = None
     
-    # Create input data dictionary if not provided
-    if input_data is None:
-        input_data = {}
+    # Input data is now always a dictionary, so just use it directly
     
     # For collecting all peak locations across all isotopes
     all_peak_locations = []
     all_peak_uncertainties = []
     peak_labels = []
     
-    # Check if input_data exists and has use_folder preference
-    if input_data is not None and 'use_folder' in input_data:
+    # Check if use_folder preference exists in input_data
+    if 'use_folder' in input_data:
         use_folder = input_data['use_folder']
         print(f"\nUsing pre-loaded preference for folder selection: {'Yes' if use_folder else 'No'}")
     else:
         # Ask if user wants to specify a folder with CSV files
         use_folder = input("\nDo you want to specify a folder containing CSV files? (y/n): ").lower().startswith('y')
-        # Save preference to input data if input_data exists
-        if input_data is not None:
-            input_data['use_folder'] = use_folder
+        # Save preference to input data
+        input_data['use_folder'] = use_folder
     
     if use_folder:
-        # Check if input_data exists and has folder_path
-        if input_data is not None and 'folder_path' in input_data:
+        # Check if folder_path exists in input_data
+        if 'folder_path' in input_data:
             folder_path = input_data['folder_path']
             print(f"\nUsing pre-loaded folder path: {folder_path}")
         else:
             # Get folder path
             folder_path = input("\nEnter the path to the folder containing CSV files: ")
-            # Save folder path to input data if input_data exists
-            if input_data is not None:
-                input_data['folder_path'] = folder_path
+            # Save folder path to input data
+            input_data['folder_path'] = folder_path
         
         # Create output folder inside the input folder
         output_folder = ensure_output_folder(folder_path)
@@ -930,7 +912,7 @@ def process_multiple_isotopes(input_data=None):
             print(f"{i+1}. {os.path.basename(file)}")
             
         # Check if file_selection_input is in input_data
-        if input_data is not None and 'file_selection_input' in input_data:
+        if 'file_selection_input' in input_data:
             file_selection = input_data['file_selection_input']
             print(f"\nUsing pre-loaded file selection: {file_selection}")
             
@@ -946,8 +928,7 @@ def process_multiple_isotopes(input_data=None):
                         print("Warning: No valid files from saved selection. Please make a new selection.")
                         # Fall back to manual selection
                         file_selection = ask_for_file_selection()
-                        if input_data is not None:
-                            input_data['file_selection_input'] = file_selection
+                        input_data['file_selection_input'] = file_selection
                             
                         if file_selection == 'all':
                             selected_files = csv_files
@@ -962,9 +943,8 @@ def process_multiple_isotopes(input_data=None):
                     print("Error in saved file selection. Please make a new selection.")
                     # Fall back to manual selection
                     file_selection = ask_for_file_selection()
-                    if input_data is not None:
-                        input_data['file_selection_input'] = file_selection
-                        
+                    input_data['file_selection_input'] = file_selection
+                    
                     if file_selection == 'all':
                         selected_files = csv_files
                     else:
@@ -977,9 +957,8 @@ def process_multiple_isotopes(input_data=None):
         else:
             # Ask which files to process manually
             file_selection = ask_for_file_selection()
-            if input_data is not None:
-                input_data['file_selection_input'] = file_selection
-                
+            input_data['file_selection_input'] = file_selection
+            
             if file_selection == 'all':
                 selected_files = csv_files
             else:
@@ -1017,11 +996,10 @@ def process_multiple_isotopes(input_data=None):
                 
                 print(f"\nSuccessfully loaded {element_name} data with {len(data)} channels")
                 
-                # Store filepath in input_data if input_data exists
-                if input_data is not None:
-                    if 'filepaths' not in input_data:
-                        input_data['filepaths'] = {}
-                    input_data['filepaths'][element_name] = filepath
+                # Store filepath in input_data
+                if 'filepaths' not in input_data:
+                    input_data['filepaths'] = {}
+                input_data['filepaths'][element_name] = filepath
                 
                 # Process multiple peaks for this isotope
                 isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data)
@@ -1097,11 +1075,10 @@ def process_multiple_isotopes(input_data=None):
                 
                 print(f"\nSuccessfully loaded {element_name} data with {len(data)} channels")
                 
-                # Store filepath in input_data if input_data exists
-                if input_data is not None:
-                    if 'filepaths' not in input_data:
-                        input_data['filepaths'] = {}
-                    input_data['filepaths'][element_name] = filepath
+                # Store filepath in input_data
+                if 'filepaths' not in input_data:
+                    input_data['filepaths'] = {}
+                input_data['filepaths'][element_name] = filepath
                 
                 # Process multiple peaks for this isotope
                 isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data)
@@ -1212,7 +1189,9 @@ def main():
     
     # Ask if user wants to use a saved input file
     use_saved_input = input("\nDo you want to use a saved input file? (y/n): ").lower().startswith('y')
-    input_data = None
+    
+    # Initialize input_data as an empty dictionary by default
+    input_data = {}
     
     if use_saved_input:
         # Get input file path
@@ -1224,8 +1203,10 @@ def main():
             use_saved_input = False
         else:
             # Load input data
-            input_data = load_user_input_from_file(input_filepath)
-            if not input_data:
+            loaded_data = load_user_input_from_file(input_filepath)
+            if loaded_data:
+                input_data = loaded_data
+            else:
                 print("Error loading input file. Continuing with manual input.")
                 use_saved_input = False
     
@@ -1238,8 +1219,7 @@ def main():
     
     if choice == '1':
         # Store choice in input_data
-        if input_data is not None:
-            input_data['processing_mode'] = 'single_file'
+        input_data['processing_mode'] = 'single_file'
             
         # Create output folder in current directory
         output_folder = ensure_output_folder()
@@ -1249,29 +1229,27 @@ def main():
         all_peak_uncertainties = []
         peak_labels = []
         
-        # Check if input_data exists and has use_folder preference
-        if input_data is not None and 'use_folder' in input_data:
+        # Check if use_folder preference exists in input_data
+        if 'use_folder' in input_data:
             use_folder = input_data['use_folder']
             print(f"\nUsing pre-loaded preference for folder selection: {'Yes' if use_folder else 'No'}")
         else:
             # Ask if user wants to select from a folder
             use_folder = input("\nDo you want to select from a folder containing CSV files? (y/n): ").lower().startswith('y')
-            # Save preference to input data if input_data exists
-            if input_data is not None:
-                input_data['use_folder'] = use_folder
+            # Save preference to input data
+            input_data['use_folder'] = use_folder
         
         filepath = ""
         if use_folder:
-            # Check if input_data exists and has folder_path
-            if input_data is not None and 'folder_path' in input_data:
+            # Check if folder_path exists in input_data
+            if 'folder_path' in input_data:
                 folder_path = input_data['folder_path']
                 print(f"\nUsing pre-loaded folder path: {folder_path}")
             else:
                 # Get folder path
                 folder_path = input("\nEnter the path to the folder containing CSV files: ")
-                # Save folder path to input data if input_data exists
-                if input_data is not None:
-                    input_data['folder_path'] = folder_path
+                # Save folder path to input data
+                input_data['folder_path'] = folder_path
             
             # Create output folder inside input folder
             output_folder = ensure_output_folder(folder_path)
@@ -1288,8 +1266,8 @@ def main():
             for i, file in enumerate(csv_files):
                 print(f"{i+1}. {os.path.basename(file)}")
             
-            # Check if file_selection is in input_data
-            if input_data is not None and 'file_selection' in input_data:
+            # Check if file_selection exists in input_data
+            if 'file_selection' in input_data:
                 file_idx = input_data['file_selection']
                 print(f"\nUsing pre-loaded file selection: {file_idx + 1}")
                 if 0 <= file_idx < len(csv_files):
@@ -1316,9 +1294,8 @@ def main():
                         file_idx = int(input("\nEnter the number of the file to process: ")) - 1
                         if 0 <= file_idx < len(csv_files):
                             filepath = csv_files[file_idx]
-                            # Save the selection if input_data exists
-                            if input_data is not None:
-                                input_data['file_selection'] = file_idx
+                            # Save the selection
+                            input_data['file_selection'] = file_idx
                             break
                         else:
                             print(f"Error: Please enter a number between 1 and {len(csv_files)}.")
@@ -1326,7 +1303,7 @@ def main():
                         print("Error: Please enter a valid number.")
         else:
             # Check if direct_filepath is in input_data
-            if input_data is not None and 'direct_filepath' in input_data:
+            if 'direct_filepath' in input_data:
                 filepath = input_data['direct_filepath']
                 print(f"\nUsing pre-loaded file path: {filepath}")
                 if not os.path.isfile(filepath):
@@ -1344,8 +1321,7 @@ def main():
                             return None
                             
                     # Save the new path
-                    if input_data is not None:
-                        input_data['direct_filepath'] = filepath
+                    input_data['direct_filepath'] = filepath
             else:
                 # Get input filename from user directly
                 print("Please enter the path to your spectrum data file:")
@@ -1360,9 +1336,8 @@ def main():
                         print(f"Error: File '{filepath}' not found.")
                         return None
                         
-                # Save the filepath if input_data exists
-                if input_data is not None:
-                    input_data['direct_filepath'] = filepath
+                # Save the filepath
+                input_data['direct_filepath'] = filepath
         
         # Get element name from user or use filename
         filename_base = os.path.splitext(os.path.basename(filepath))[0]
@@ -1387,11 +1362,10 @@ def main():
             print(f"\nSuccessfully loaded {element_name} data with {len(data)} channels")
             print(f"Max counts: {data['Counts'].max():.0f} at channel {data['Counts'].idxmax()}")
             
-            # Store filepath in input_data if input_data exists
-            if input_data is not None:
-                if 'filepaths' not in input_data:
-                    input_data['filepaths'] = {}
-                input_data['filepaths'][element_name] = filepath
+            # Store filepath in input_data
+            if 'filepaths' not in input_data:
+                input_data['filepaths'] = {}
+            input_data['filepaths'][element_name] = filepath
             
             # Process multiple peaks for this single isotope
             isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data)
@@ -1433,8 +1407,7 @@ def main():
             return None
     else:
         # Store choice in input_data
-        if input_data is not None:
-            input_data['processing_mode'] = 'multiple_isotopes'
+        input_data['processing_mode'] = 'multiple_isotopes'
             
         # Process multiple isotopes
         return process_multiple_isotopes(input_data)
