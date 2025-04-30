@@ -483,13 +483,13 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
             'peak_height': peak_height
         }
 
-def save_user_input(input_data, element_name, output_folder=None):
+def save_user_input(input_data, filename=None, output_folder=None):
     """
     Save user input data to a JSON file for future reference.
     
     Args:
         input_data: Dictionary containing user inputs
-        element_name: Name of the element being analyzed
+        filename: Optional custom filename (without extension)
         output_folder: Optional output folder path
     
     Returns:
@@ -498,8 +498,14 @@ def save_user_input(input_data, element_name, output_folder=None):
     # Add timestamp
     input_data['timestamp'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Create filename based on element name
-    filename = f"{element_name}_input.json"
+    # Create filename based on element name or default
+    if not filename:
+        if 'element_name' in input_data:
+            filename = f"{input_data['element_name']}_input"
+        else:
+            filename = "spectrum_config"
+    
+    filename = f"{filename}.json"
     
     # Save to output folder if specified
     if output_folder:
@@ -953,6 +959,137 @@ def ask_for_file_selection():
     print("Enter file numbers separated by commas (e.g., 1,3,5), or 'all' for all files:")
     return input("Selection: ").strip().lower()
 
+def process_single_file(filepath, input_data=None, output_folder=None):
+    """
+    Process a single spectrum data file, with multiple peaks.
+    
+    Args:
+        filepath: Path to the CSV file to process
+        input_data: Optional dictionary containing pre-loaded input parameters
+        output_folder: Optional output folder path
+    
+    Returns:
+        Dictionary containing results for this file
+    """
+    # Initialize input_data if not provided
+    if input_data is None:
+        input_data = {}
+    
+    # File ID is the base filename (used as a key in configs)
+    file_id = os.path.basename(filepath)
+    
+    # Get element name from file-specific config if available
+    if file_id in input_data and 'element_name' in input_data[file_id]:
+        element_name = input_data[file_id]['element_name']
+        print(f"\nUsing pre-configured element name for {file_id}: {element_name}")
+    # Otherwise check for global element_name
+    elif 'element_name' in input_data:
+        element_name = input_data['element_name']
+        print(f"\nUsing element name from input data: {element_name}")
+    else:
+        # Suggest from filename
+        filename_base = os.path.splitext(os.path.basename(filepath))[0]
+        print(f"\nSuggested element name based on filename: {filename_base}")
+        print("Press Enter to accept this name, or type a different name:")
+        element_name = input("Element: ") or filename_base
+        
+        # Make sure we have a place to store file-specific settings
+        if file_id not in input_data:
+            input_data[file_id] = {}
+        
+        # Store element name in both places for backward compatibility
+        input_data['element_name'] = element_name
+        input_data[file_id]['element_name'] = element_name
+    
+    # Format element name for nice titles
+    formatted_element = element_name
+    # Try to identify if there's a number in the element name
+    match = re.match(r'([a-zA-Z]+)(\d+)', element_name)
+    if match:
+        element, number = match.groups()
+        # Capitalize the element and format with a hyphen
+        formatted_element = f"{element.capitalize()}-{number}"
+    
+    try:
+        # Read the data
+        data = read_spectrum_data(filepath)
+        
+        print(f"\nSuccessfully loaded {formatted_element} data with {len(data)} channels")
+        print(f"Max counts: {data['Counts'].max():.0f} at channel {data['Counts'].idxmax()}")
+        
+        # Store filepath in input_data
+        if 'filepaths' not in input_data:
+            input_data['filepaths'] = {}
+        input_data['filepaths'][element_name] = filepath
+        
+        # Make sure we have a section for this file's config
+        if file_id not in input_data:
+            input_data[file_id] = {}
+        
+        # Set element name in file-specific config
+        input_data[file_id]['element_name'] = element_name
+        
+        # Process the file with its file-specific config
+        file_config = input_data[file_id]
+        
+        # Set output folder in file config
+        if output_folder:
+            file_config['output_folder'] = output_folder
+            
+        # Process multiple peaks for this single isotope
+        isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, file_config)
+        
+        # Update the file-specific config with any changes from processing
+        input_data[file_id] = file_config
+        
+        # Collect peak information for return
+        all_peak_locations = isotope_data['peak_locations']
+        all_peak_uncertainties = isotope_data['peak_uncertainties']
+        peak_labels = []
+        
+        for j, (loc, err) in enumerate(zip(all_peak_locations, all_peak_uncertainties)):
+            if len(all_peak_locations) > 1:
+                peak_labels.append(f"{element_name}_peak{j+1}")
+            else:
+                peak_labels.append(element_name)
+        
+        # Display summary of peak locations and uncertainties
+        if all_peak_locations:
+            print("\n\n" + "="*70)
+            print(f"SUMMARY OF {formatted_element} PEAK LOCATIONS AND UNCERTAINTIES".center(70))
+            print("="*70)
+            
+            # Print labels for reference
+            print("Peak Labels (for reference only):")
+            for i, label in enumerate(peak_labels):
+                print(f"{i+1}: {label}")
+            
+            print("\nPeak Locations (channels):")
+            print(all_peak_locations)
+            
+            print("\nPeak Uncertainties (channels, 1σ):")
+            print(all_peak_uncertainties)
+            
+            print("="*70)
+            print("Copy-paste the above lists for your records!".center(70))
+            print("="*70)
+        
+        # Save the configuration with all updates
+        save_user_input(input_data, f"{element_name}_complete", output_folder)
+        
+        return {
+            'element_name': element_name,
+            'formatted_name': formatted_element,
+            'results': isotope_data['results'],
+            'peak_locations': all_peak_locations,
+            'peak_uncertainties': all_peak_uncertainties,
+            'peak_labels': peak_labels
+        }
+        
+    except Exception as e:
+        print(f"Error during analysis of {element_name}: {e}")
+        return None
+
 def process_multiple_isotopes(input_data={}):
     """
     Process multiple isotopes, each with potentially multiple peaks.
@@ -969,7 +1106,7 @@ def process_multiple_isotopes(input_data={}):
     # For collecting all peak locations across all isotopes
     all_peak_locations = []
     all_peak_uncertainties = []
-    peak_labels = []
+    all_peak_labels = []
     
     # Check if use_folder preference exists in input_data
     if 'use_folder' in input_data:
@@ -1054,60 +1191,26 @@ def process_multiple_isotopes(input_data={}):
                         print("Invalid selection. No files will be processed.")
                         return {}
         
-        # Process each selected file
+        # Process each selected file using the process_single_file function
         for i, filepath in enumerate(selected_files):
             print(f"\n\n=== Processing File {i+1} of {len(selected_files)}: {os.path.basename(filepath)} ===")
             
-            # Get element name from input_data if available, otherwise from user or filename
-            if 'element_name' in input_data:
-                element_name = input_data['element_name']
-                print(f"\nUsing element name from input data: {element_name}")
-            else:
-                filename_base = os.path.splitext(os.path.basename(filepath))[0]
-                print(f"\nSuggested element name based on filename: {filename_base}")
-                print("Press Enter to accept this name, or type a different name:")
-                element_name = input("Element: ") or filename_base
+            # Process the file with a copy of the input_data to avoid cross-file configuration issues
+            file_result = process_single_file(filepath, input_data, output_folder)
             
-            # Format element name for nice titles
-            # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
-            formatted_element = element_name
-            # Try to identify if there's a number in the element name
-            import re
-            match = re.match(r'([a-zA-Z]+)(\d+)', element_name)
-            if match:
-                element, number = match.groups()
-                # Capitalize the element and format with a hyphen
-                formatted_element = f"{element.capitalize()}-{number}"
-            
-            try:
-                # Read the data
-                data = read_spectrum_data(filepath)
-                
-                print(f"\nSuccessfully loaded {formatted_element} data with {len(data)} channels")
-                
-                # Store filepath in input_data
-                if 'filepaths' not in input_data:
-                    input_data['filepaths'] = {}
-                input_data['filepaths'][element_name] = filepath
-                
-                # Process multiple peaks for this isotope
-                isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data)
-                
+            if file_result:
                 # Store results
-                all_isotope_results[element_name] = isotope_data['results']
+                element_name = file_result['element_name']
+                all_isotope_results[element_name] = file_result['results']
                 
-                # Collect peak information
-                for j, (loc, err) in enumerate(zip(isotope_data['peak_locations'], isotope_data['peak_uncertainties'])):
+                # Collect peak information for summary display
+                for j, (loc, err, label) in enumerate(zip(
+                        file_result['peak_locations'], 
+                        file_result['peak_uncertainties'],
+                        file_result['peak_labels'])):
                     all_peak_locations.append(loc)
                     all_peak_uncertainties.append(err)
-                    if len(isotope_data['peak_locations']) > 1:
-                        # Use consistent format with the numbered peak_id
-                        peak_labels.append(f"{element_name} Peak {j+1}")
-                    else:
-                        peak_labels.append(element_name)
-                
-            except Exception as e:
-                print(f"Error during analysis of {element_name}: {e}")
+                    all_peak_labels.append(label)
     else:
         # Manual file entry mode
         # Create output folder in current directory
@@ -1141,53 +1244,36 @@ def process_multiple_isotopes(input_data={}):
                     print(f"Error: File '{filepath}' not found.")
                     continue
             
+            # For manual entry, set element name in input_data here
+            # This makes it clearer where the config for each file starts
+            file_id = os.path.basename(filepath)
+            
             # Get element name from user
             print("\nPlease enter the element name or isotope being analyzed (e.g., Co60, Na22):")
-            element_name = input("Element: ")
-            if not element_name:
-                # Use filename as fallback
-                element_name = os.path.splitext(os.path.basename(filepath))[0]
+            element_name = input("Element: ") or os.path.splitext(file_id)[0]
             
-            # Format element name for nice titles
-            # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
-            formatted_element = element_name
-            # Try to identify if there's a number in the element name
-            import re
-            match = re.match(r'([a-zA-Z]+)(\d+)', element_name)
-            if match:
-                element, number = match.groups()
-                # Capitalize the element and format with a hyphen
-                formatted_element = f"{element.capitalize()}-{number}"
+            # Set up file-specific config
+            if file_id not in input_data:
+                input_data[file_id] = {'element_name': element_name}
+            else:
+                input_data[file_id]['element_name'] = element_name
             
-            try:
-                # Read the data
-                data = read_spectrum_data(filepath)
-                
-                print(f"\nSuccessfully loaded {formatted_element} data with {len(data)} channels")
-                
-                # Store filepath in input_data
-                if 'filepaths' not in input_data:
-                    input_data['filepaths'] = {}
-                input_data['filepaths'][element_name] = filepath
-                
-                # Process multiple peaks for this isotope
-                isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data)
-                
+            # Process the file using process_single_file
+            file_result = process_single_file(filepath, input_data, output_folder)
+            
+            if file_result:
                 # Store results
-                all_isotope_results[element_name] = isotope_data['results']
+                element_name = file_result['element_name']
+                all_isotope_results[element_name] = file_result['results']
                 
-                # Collect peak information
-                for j, (loc, err) in enumerate(zip(isotope_data['peak_locations'], isotope_data['peak_uncertainties'])):
+                # Collect peak information for summary display
+                for j, (loc, err, label) in enumerate(zip(
+                        file_result['peak_locations'], 
+                        file_result['peak_uncertainties'],
+                        file_result['peak_labels'])):
                     all_peak_locations.append(loc)
                     all_peak_uncertainties.append(err)
-                    if len(isotope_data['peak_locations']) > 1:
-                        # Use consistent format with the numbered peak_id
-                        peak_labels.append(f"{element_name} Peak {j+1}")
-                    else:
-                        peak_labels.append(element_name)
-                
-            except Exception as e:
-                print(f"Error during analysis of {element_name}: {e}")
+                    all_peak_labels.append(label)
     
     # Display summary of all peak locations and uncertainties
     if all_peak_locations:
@@ -1197,7 +1283,7 @@ def process_multiple_isotopes(input_data={}):
         
         # Print labels for reference (but not for copying)
         print("Peak Labels (for reference only):")
-        for i, label in enumerate(peak_labels):
+        for i, label in enumerate(all_peak_labels):
             print(f"{i+1}: {label}")
         
         print("\nPeak Locations (channels):")
@@ -1251,6 +1337,15 @@ def process_multiple_isotopes(input_data={}):
                 energy_peaks.append(energy)
                 energy_uncertainties.append(energy_err)
             
+            # Store the energy conversion parameters in input_data
+            if 'energy_conversion' not in input_data:
+                input_data['energy_conversion'] = {
+                    'a': a, 
+                    'a_err': a_err,
+                    'b': b,
+                    'b_err': b_err
+                }
+            
             print("\n" + "="*70)
             print("ENERGY CONVERSION RESULTS".center(70))
             print("="*70)
@@ -1262,12 +1357,15 @@ def process_multiple_isotopes(input_data={}):
             print([f"{e:.4f}" for e in energy_uncertainties])
             
             print("\nDetailed Peak Energies:")
-            for i, (energy, err, label) in enumerate(zip(energy_peaks, energy_uncertainties, peak_labels)):
+            for i, (energy, err, label) in enumerate(zip(energy_peaks, energy_uncertainties, all_peak_labels)):
                 print(f"{i+1}: {label} = {energy:.4f} ± {err:.4f} MeV")
         
         print("\n" + "="*70)
         print("Copy-paste the above lists for your records!".center(70))
         print("="*70)
+    
+    # Save final complete configuration with all updates
+    save_user_input(input_data, "all_isotopes_complete", output_folder)
     
     return all_isotope_results
 
@@ -1290,7 +1388,6 @@ def main():
         # Check if file exists
         if not os.path.isfile(input_filepath):
             print(f"Error: File '{input_filepath}' not found.")
-            use_saved_input = False
         else:
             # Load input data
             loaded_data = load_user_input_from_file(input_filepath)
@@ -1298,26 +1395,22 @@ def main():
                 input_data = loaded_data
             else:
                 print("Error loading input file. Continuing with manual input.")
-                use_saved_input = False
     
-    # Ask if user wants to process multiple isotopes or a single file
+    # Ask if user wants to process multiple files or a single file
     while True:
-        choice = input("\nDo you want to process (1) a single file or (2) multiple isotopes? (1/2): ")
+        choice = input("\nDo you want to process (1) a single file or (2) multiple files? (1/2): ")
         if choice in ['1', '2']:
             break
         print("Error: Please enter 1 or 2.")
     
+    # Store choice in input_data
+    input_data['processing_mode'] = 'single_file' if choice == '1' else 'multiple_files'
+    
     if choice == '1':
-        # Store choice in input_data
-        input_data['processing_mode'] = 'single_file'
-            
+        # Single file processing
+        
         # Create output folder in current directory
         output_folder = ensure_output_folder()
-        
-        # For collecting peak information
-        all_peak_locations = []
-        all_peak_uncertainties = []
-        peak_labels = []
         
         # Check if use_folder preference exists in input_data
         if 'use_folder' in input_data:
@@ -1429,82 +1522,10 @@ def main():
                 # Save the filepath
                 input_data['direct_filepath'] = filepath
         
-        # Get element name from input_data if available, otherwise from user or filename
-        if 'element_name' in input_data:
-            element_name = input_data['element_name']
-            print(f"\nUsing element name from input data: {element_name}")
-        else:
-            filename_base = os.path.splitext(os.path.basename(filepath))[0]
-            print(f"\nSuggested element name based on filename: {filename_base}")
-            print("Press Enter to accept this name, or type a different name:")
-            element_name = input("Element: ") or filename_base
-        
-        # Format element name for nice titles
-        # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
-        formatted_element = element_name
-        # Try to identify if there's a number in the element name
-        import re
-        match = re.match(r'([a-zA-Z]+)(\d+)', element_name)
-        if match:
-            element, number = match.groups()
-            # Capitalize the element and format with a hyphen
-            formatted_element = f"{element.capitalize()}-{number}"
-        
-        try:
-            # Read the data
-            data = read_spectrum_data(filepath)
-            
-            print(f"\nSuccessfully loaded {formatted_element} data with {len(data)} channels")
-            print(f"Max counts: {data['Counts'].max():.0f} at channel {data['Counts'].idxmax()}")
-            
-            # Store filepath in input_data
-            if 'filepaths' not in input_data:
-                input_data['filepaths'] = {}
-            input_data['filepaths'][element_name] = filepath
-            
-            # Process multiple peaks for this single isotope
-            isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data)
-            
-            # Collect peak information
-            for j, (loc, err) in enumerate(zip(isotope_data['peak_locations'], isotope_data['peak_uncertainties'])):
-                all_peak_locations.append(loc)
-                all_peak_uncertainties.append(err)
-                if len(isotope_data['peak_locations']) > 1:
-                    peak_labels.append(f"{element_name}_peak{j+1}")
-                else:
-                    peak_labels.append(element_name)
-            
-            # Display summary of all peak locations and uncertainties
-            if all_peak_locations:
-                print("\n\n" + "="*70)
-                print("SUMMARY OF ALL PEAK LOCATIONS AND UNCERTAINTIES".center(70))
-                print("="*70)
-                
-                # Print labels for reference (but not for copying)
-                print("Peak Labels (for reference only):")
-                for i, label in enumerate(peak_labels):
-                    print(f"{i+1}: {label}")
-                
-                print("\nPeak Locations (channels):")
-                print(all_peak_locations)
-                
-                print("\nPeak Uncertainties (channels, 1σ):")
-                print(all_peak_uncertainties)
-                
-                print("="*70)
-                print("Copy-paste the above lists for your records!".center(70))
-                print("="*70)
-            
-            return {element_name: isotope_data['results']}
-            
-        except Exception as e:
-            print(f"Error during analysis: {e}")
-            return None
+        # Process single file with our core function
+        return process_single_file(filepath, input_data, output_folder)
     else:
-        # Store choice in input_data
-        input_data['processing_mode'] = 'multiple_isotopes'
-            
-        # Process multiple isotopes
+        # Multiple files processing
         return process_multiple_isotopes(input_data)
 
 if __name__ == "__main__":
