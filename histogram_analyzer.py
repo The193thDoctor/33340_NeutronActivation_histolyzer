@@ -5,6 +5,7 @@ import os
 import pathlib
 import json
 import datetime
+import re
 from scipy.signal import find_peaks
 from scipy.optimize import curve_fit
 from scipy import stats
@@ -126,11 +127,21 @@ def plot_histogram(data, element_name, title=None, file_prefix=None, output_fold
     
     # If peak_labels is provided, use those for labeling
     if peak_labels:
-        for channel, label in peak_labels:
+        # Try to use peak_heights if provided as a parameter
+        peak_heights = getattr(data, 'peak_heights', None)
+        
+        for i, (channel, label) in enumerate(peak_labels):
+            # If we have peak heights data, use it
+            if isinstance(peak_heights, dict) and str(i) in peak_heights:
+                label_height = peak_heights[str(i)]
+                # Ensure label is visible
+                label_height = max(label_height, data['Counts'].max() * 0.25)
+            else:
+                # Fallback to actual count or 90% of max
+                label_height = data.loc[data['Channel'] == channel, 'Counts'].values[0] if channel in data['Channel'].values else data['Counts'].max() * 0.9
+            
             plt.annotate(label,
-                         xy=(channel, data.loc[data['Channel'] == channel, 'Counts'].values[0] 
-                             if channel in data['Channel'].values 
-                             else data['Counts'].max() * 0.9),
+                         xy=(channel, label_height),
                          xytext=(0, 10),
                          textcoords='offset points',
                          ha='center')
@@ -220,113 +231,155 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
     try:
         # Fit the Gaussian
         popt, pcov = curve_fit(gaussian, x_data, y_data, p0=p0)
-        
+
         # Extract parameters
         amplitude, mu, sigma, const = popt
-        
+
         # Calculate parameter uncertainties from covariance matrix
         perr = np.sqrt(np.diag(pcov))
         
         # Apply uncertainty scale factor (default is 3.0 for standard error)
         perr = perr * uncertainty_factor
-        
+
         # Calculate correlation matrix (using original covariance)
         correlation = pcov / np.outer(np.sqrt(np.diag(pcov)), np.sqrt(np.diag(pcov)))
-        
+
         # Generate fitted curve
         y_fit = gaussian(x_data, *popt)
-        
+
         # Calculate residuals and chi-square
         residuals = y_data - y_fit
-        
+
         # Calculate Poisson-based uncertainties for each point
         # Standard error for count data is approximately sqrt(N)
         poisson_errors = np.sqrt(np.abs(y_fit))
-        
+
         # Use the larger of the Poisson error or the residual for each point
         # to account for both statistical and potential systematic uncertainties
         combined_errors = np.maximum(poisson_errors, np.abs(residuals))
-        
+
         # Recalculate chi-square with these conservative errors
         chi_square = np.sum((residuals / combined_errors)**2)
         dof = len(y_data) - len(popt)  # degrees of freedom
         reduced_chi_square = chi_square / dof
         p_value = 1 - stats.chi2.cdf(chi_square, dof)
-        
+
         # Calculate confidence interval for peak position (1-sigma)
         conf_interval = perr[1]
-        
+
         # Additional uncertainty estimation methods
         
-        # 1. Half width method - estimate uncertainty as percentage of peak width
+        # Width-based estimate - 10% of the peak width as a simple heuristic
         width_based_err = sigma * 0.1  # 10% of the peak width
         
-        # 2. Estimate from peak position variation with different background choices
-        # Simulate by slightly varying the background points
-        background_variations = []
+        # Estimate from peak position variation by varying window size
+        # Vary the left and right window points by a random amount within 5% of the window size
+        window_variations = []
+        window_size = end_ch - start_ch
+        
+        # Using a fixed seed would defeat the randomness, so don't set one
         for i in range(5):
-            # Vary background by random amounts within 5%
-            var_start = start_count * (1 + np.random.uniform(-0.05, 0.05))
-            var_end = end_count * (1 + np.random.uniform(-0.05, 0.05))
+            # Vary window endpoints by random amounts within 5% of window size
+            # Make sure we're generating new random values each time
+            var_window_left = max(0, start_ch + int(np.random.uniform(-0.05, 0.05) * window_size))
+            var_window_right = min(max(channels), end_ch + int(np.random.uniform(-0.05, 0.05) * window_size))
             
-            # Recalculate background
-            var_m = (var_end - var_start) / (end_ch - start_ch)
-            var_b = var_start - var_m * start_ch
-            var_background = var_m * channels + var_b
+            # Create a mask for the varied window
+            var_mask = (range_data['Channel'] >= var_window_left) & (range_data['Channel'] <= var_window_right)
+            var_range_data = range_data[var_mask].copy()
             
+            # Skip if we don't have enough data points
+            if len(var_range_data) < 10:
+                continue
+                
+            var_channels = var_range_data['Channel'].values
+            
+            # Calculate linear background using the varied window endpoints
+            var_start_count = data.loc[data['Channel'] == var_window_left, 'Counts'].values[0]
+            var_end_count = data.loc[data['Channel'] == var_window_right, 'Counts'].values[0]
+            
+            var_m = (var_end_count - var_start_count) / (var_window_right - var_window_left)
+            var_b = var_start_count - var_m * var_window_left
+            var_background = var_m * var_channels + var_b
+
             # Subtract new background
-            var_subtracted = range_data['Counts'].values - var_background
-            
-            # Quick simple estimation of peak
-            peak_idx = np.argmax(var_subtracted)
-            background_variations.append(channels[peak_idx])
-        
-        # Calculate standard deviation of peak positions from background variations
-        background_var_err = np.std(background_variations)
-        
-        # 3. Channel discretization error (half a channel)
+            var_subtracted = var_range_data['Counts'].values - var_background
+
+            # Find the approximate maximum to use as initial guess for Gaussian fit
+            var_peak_idx = np.argmax(var_subtracted)
+            var_max_channel = var_channels[var_peak_idx]
+            var_max_subtracted = var_subtracted[var_peak_idx]
+
+            try:
+                # Initial parameter guesses [amplitude, mean, sigma, constant]
+                var_width_guess = (var_window_right - var_window_left) / 10
+                var_p0 = [var_max_subtracted, var_max_channel, var_width_guess, 0]
+
+                # Fit the Gaussian - using all data in the varied window
+                var_x_data = var_channels
+                var_y_data = var_subtracted
+                
+                var_popt, _ = curve_fit(gaussian, var_x_data, var_y_data, p0=var_p0)
+
+                # Extract the peak center (mu parameter)
+                var_refined_peak = var_popt[1]
+                window_variations.append(var_refined_peak)
+            except Exception:
+                # Fallback if fit fails - just use the simple maximum
+                window_variations.append(var_max_channel)
+
+        # Calculate standard deviation of peak positions from window variations
+        window_var_err = np.std(window_variations) if window_variations else sigma * 0.05  # default fallback
+
+        # Channel discretization error (half a channel)
         channel_err = 0.5
-        
-        # Combine all error sources - take the maximum
-        final_err = np.max([perr[1], width_based_err, background_var_err, channel_err])
-        
+
+        # LEGACY UNCERTAINTY BRANCH DIFFERENCE
+        # In this branch, we take the maximum of all error components instead of quadrature
+        final_err = np.max([perr[1], width_based_err, window_var_err, channel_err])
+
         print(f"\nUncertainty Estimation Components:")
         print(f"Statistical (from fit): {perr[1]:.4f} channels")
         print(f"Width-based (10% of sigma): {width_based_err:.4f} channels")
-        print(f"Background variation: {background_var_err:.4f} channels")
+        print(f"Window variation: {window_var_err:.4f} channels")
         print(f"Channel discretization: {channel_err:.4f} channels")
         print(f"Combined (max): {final_err:.4f} channels")
         
         # Plot the results
         plt.figure(figsize=(12, 12))
-        
+
         # Plot 1: Original data with linear background
         plt.subplot(311)
-        plt.bar(range_data['Channel'], range_data['Counts'], width=1.0, 
+        plt.bar(range_data['Channel'], range_data['Counts'], width=1.0,
                 color='blue', alpha=0.7, label='Original Data')
-        plt.plot(range_data['Channel'], range_data['Background'], 'r-', 
+        plt.plot(range_data['Channel'], range_data['Background'], 'r-',
                 linewidth=2, label='Linear Background')
         plt.xlabel('Channel')
         plt.ylabel('Counts')
-        
+
         # Use peak_id in title if provided
         peak_title = f"{element_name}"
         if peak_id:
             peak_title = f"{element_name} Peak {peak_id}"
-            
+
         plt.title(f'{peak_title} Spectrum with Linear Background')
         plt.legend()
         plt.grid(True, alpha=0.3)
-        
+
         # Plot 2: Background-subtracted data with Gaussian fit
         plt.subplot(312)
-        plt.bar(range_data['Channel'], range_data['Subtracted'], width=1.0, 
+        plt.bar(range_data['Channel'], range_data['Subtracted'], width=1.0,
                 color='green', alpha=0.7, label='Background Subtracted')
-        plt.plot(x_data, y_fit, 'r-', linewidth=2, 
+                
+        # Generate a smooth curve for plotting using dense points
+        x_dense = np.linspace(min(x_data), max(x_data), 500)
+        y_dense = gaussian(x_dense, *popt)
+                
+        plt.plot(x_dense, y_dense, 'r-', linewidth=2,
                 label=f'Gaussian Fit (μ={mu:.2f}±{final_err:.2f})')
-        
+
         # Add shaded region to indicate uncertainty
-        plt.axvspan(mu - final_err, mu + final_err, 
+        plt.axvspan(mu - final_err, mu + final_err,
                    alpha=0.2, color='red', label='Peak Uncertainty Interval')
         plt.axvline(x=mu, color='k', linestyle='--')
         plt.xlabel('Channel')
@@ -334,39 +387,54 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         plt.title(f'{peak_title} with Gaussian Fit & Uncertainty')
         plt.legend()
         plt.grid(True, alpha=0.3)
-        
+
         # Plot 3: Residuals
         plt.subplot(313)
-        plt.bar(x_data, residuals, width=1.0, color='purple', alpha=0.7)
-        plt.fill_between(x_data, -combined_errors, combined_errors, color='gray', alpha=0.3, 
-                         label='Estimated Error Band')
+        
+        # Ensure x_data and residuals have the same length
+        if len(x_data) != len(residuals):
+            # Use channel numbers as x-axis instead
+            plt.bar(range(len(residuals)), residuals, width=1.0, color='purple', alpha=0.7)
+            plt.fill_between(range(len(residuals)), -combined_errors, combined_errors, color='gray', alpha=0.3,
+                             label='Estimated Error Band')
+            # Set x-axis to match the original channel range
+            plt.xlim(0, len(residuals)-1)
+            plt.xticks([])  # Hide x ticks as they don't directly correspond to channels
+        else:
+            plt.bar(x_data, residuals, width=1.0, color='purple', alpha=0.7)
+            plt.fill_between(x_data, -combined_errors, combined_errors, color='gray', alpha=0.3,
+                             label='Estimated Error Band')
         plt.axhline(y=0, color='k', linestyle='-')
         plt.xlabel('Channel')
         plt.ylabel('Residuals (Data - Fit)')
         plt.title(f'{peak_title} Fit Residuals')
         plt.legend()
         plt.grid(True, alpha=0.3)
-        
+
         # Generate filename based on element name and peak ID
         plt.tight_layout()
-        
+
         # Save to output folder if specified
         filename = f'{file_prefix}_gaussian_fit.png'
         if output_folder:
             output_path = os.path.join(output_folder, filename)
         else:
             output_path = filename
-            
+
         plt.savefig(output_path, dpi=300)
         plt.show()
-        
+
         print(f"Gaussian fit plot saved to: {output_path}")
-        
+
         # Print detailed statistical information
         print(f"\nDetailed Analysis for {peak_title}:")
         print(f"Peak Center: {mu:.4f} ± {final_err:.4f} channels (1σ)")
         print(f"FWHM: {2.355 * sigma:.4f} ± {2.355 * perr[2]:.4f} channels")
         print(f"Reduced Chi-square: {reduced_chi_square:.4f} (DoF: {dof})")
+
+        # Calculate total peak height (amplitude + background at peak center)
+        # Background at peak center using m and b from earlier linear interpolation
+        peak_height = amplitude + (m * mu + b)
         
         # Return fit results
         fit_results = {
@@ -380,6 +448,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
             'amplitude_err': perr[0],
             'constant': const,
             'constant_err': perr[3],
+            'peak_height': peak_height,  # Total height including background
             'fwhm': 2.355 * sigma,  # FWHM = 2.355 * sigma for Gaussian
             'fwhm_err': 2.355 * perr[2],
             'chi_square': chi_square,
@@ -388,32 +457,36 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
             'correlation_matrix': correlation,
             'residuals': residuals,
             'stat_err': perr[1],
-            'width_based_err': width_based_err,
-            'background_var_err': background_var_err,
-            'channel_err': channel_err
+            'window_var_err': window_var_err,
+            'channel_err': channel_err,
+            'width_based_err': width_based_err
         }
-        
+
         return fit_results
         
     except Exception as e:
         print(f"Error in Gaussian fitting: {e}")
         # If fitting fails, return the simple maximum with a generous uncertainty
+        # Calculate total peak height (raw subtracted value + background at that position)
+        peak_height = max_subtracted + (m * max_channel + b)
+        
         return {
             'element': element_name,
             'peak_id': peak_id,
             'center': max_channel,
             'center_err': (end_ch - start_ch) / 10,  # Conservative fallback
             'amplitude': max_subtracted,
-            'amplitude_err': np.sqrt(max_subtracted) * 2  # Poisson error × 2
+            'amplitude_err': np.sqrt(max_subtracted) * 2,  # Poisson error × 2
+            'peak_height': peak_height
         }
 
-def save_user_input(input_data, element_name, output_folder=None):
+def save_user_input(input_data, filename=None, output_folder=None):
     """
     Save user input data to a JSON file for future reference.
     
     Args:
         input_data: Dictionary containing user inputs
-        element_name: Name of the element being analyzed
+        filename: Optional custom filename (without extension)
         output_folder: Optional output folder path
     
     Returns:
@@ -422,8 +495,14 @@ def save_user_input(input_data, element_name, output_folder=None):
     # Add timestamp
     input_data['timestamp'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Create filename based on element name
-    filename = f"{element_name}_input.json"
+    # Create filename based on element name or default
+    if not filename:
+        if 'element_name' in input_data:
+            filename = f"{input_data['element_name']}_input"
+        else:
+            filename = "spectrum_config"
+    
+    filename = f"{filename}.json"
     
     # Save to output folder if specified
     if output_folder:
@@ -512,7 +591,7 @@ def process_peak(data, element_name, peak_id=None, output_folder=None, input_dat
 
             except ValueError:
                 print("Error: Please enter valid integer channel numbers.")
-        
+                
         # Save this input to the user inputs dictionary
         input_data[input_key] = {
             'start_ch': start_ch,
@@ -552,24 +631,33 @@ def process_peak(data, element_name, peak_id=None, output_folder=None, input_dat
     
     return fit_results
 
-def process_multiple_peaks_one_isotope(data, input_data={}):
+def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, input_data={}):
     """
     Process multiple peaks for a single isotope.
     
     Args:
         data: DataFrame with channels and counts
-        input_data: Dictionary containing input parameters including element_name and output_folder
+        element_name: Name of the element being analyzed
+        output_folder: Optional output folder path
+        input_data: Optional pre-loaded input data
     
     Returns:
         Dictionary containing peak results and additional information
     """
-    # Extract element_name and output_folder from input_data
-    element_name = input_data.get('element_name', '')
-    output_folder = input_data.get('output_folder', None)
+    # Get file ID if possible for file-specific settings
+    file_id = None
+    for f_id, config in input_data.items():
+        if isinstance(config, dict) and config.get('element_name') == element_name:
+            file_id = f_id
+            break
+            
+    # Store element name in file-specific section if possible
+    if file_id:
+        input_data[file_id]['element_name'] = element_name
     
-    # Ensure we have a valid element name
-    if not element_name:
-        raise ValueError("Element name must be provided in input_data")
+    # Store output folder
+    if output_folder:
+        input_data['output_folder'] = output_folder
     
     # Plot the initial spectrum without peak labels
     title = f"{element_name} Radiation Spectrum"
@@ -590,7 +678,7 @@ def process_multiple_peaks_one_isotope(data, input_data={}):
                 break
             except ValueError:
                 print("Error: Please enter a valid integer.")
-        
+                
         # Save number of peaks to input data
         input_data['num_peaks'] = num_peaks
     
@@ -640,8 +728,10 @@ def process_multiple_peaks_one_isotope(data, input_data={}):
             else:
                 # Ask if user wants to convert to energy (MeV)
                 use_energy = input("\nDo you want to convert the x-axis to energy (MeV)? (y/n): ").lower().startswith('y')
-                
-                if use_energy:
+            
+            if use_energy:
+                # Only ask for parameters if we don't already have them from the config
+                if a is None or b is None or a_err is None or b_err is None:
                     # Get conversion parameters (C = a + b*E)
                     print("\nPlease enter the parameters for the conversion: Channel = a + b*Energy(MeV)")
                     while True:
@@ -658,16 +748,15 @@ def process_multiple_peaks_one_isotope(data, input_data={}):
                             break
                         except ValueError:
                             print("Error: Please enter valid numbers.")
-                    
-                    # Save energy conversion parameters
-                    input_data['energy_conversion'] = {
-                        'a': a,
-                        'a_err': a_err,
-                        'b': b,
-                        'b_err': b_err
-                    }
-            
-            if use_energy:
+                
+                # Save energy conversion parameters
+                input_data['energy_conversion'] = {
+                    'a': a,
+                    'a_err': a_err,
+                    'b': b,
+                    'b_err': b_err
+                }
+                
                 # Create a copy of the data with energy axis
                 data_with_energy = data.copy()
                 # Convert channel to energy: E = (C-a)/b
@@ -685,7 +774,7 @@ def process_multiple_peaks_one_isotope(data, input_data={}):
                     # For function E = (C-a)/b, the uncertainty is:
                     # σ_E^2 = (∂E/∂C)^2 * σ_C^2 + (∂E/∂a)^2 * σ_a^2 + (∂E/∂b)^2 * σ_b^2
                     # where ∂E/∂C = 1/b, ∂E/∂a = -1/b, ∂E/∂b = -(C-a)/b^2
-                    
+
                     dE_dC = 1/b
                     dE_da = -1/b
                     dE_db = -(loc-a)/(b**2)
@@ -763,12 +852,24 @@ def process_multiple_peaks_one_isotope(data, input_data={}):
                 plt.grid(True, alpha=0.3)
                 
                 # Add peak labels
-                for channel, label in peak_labels:
+                for i, (channel, label) in enumerate(peak_labels):
                     energy_value = (channel - a) / b
+                    
+                    # Get the peak_id (key in all_results dictionary)
+                    peak_key = f"{i+1}" if num_peaks > 1 else 'main'
+                    fit_result = all_results.get(peak_key, {})
+                    
+                    # Use fitted peak height if available
+                    if 'peak_height' in fit_result:
+                        label_height = fit_result['peak_height']
+                        # For very small peaks, ensure the label is visible
+                        label_height = max(label_height, data['Counts'].max() * 0.25)
+                    else:
+                        # Fallback to actual count or 90% of max
+                        label_height = data.loc[data['Channel'] == channel, 'Counts'].values[0] if channel in data['Channel'].values else data['Counts'].max() * 0.9
+                    
                     plt.annotate(label,
-                                 xy=(energy_value, data.loc[data['Channel'] == channel, 'Counts'].values[0] 
-                                     if channel in data['Channel'].values 
-                                     else data['Counts'].max() * 0.9),
+                                 xy=(energy_value, label_height),
                                  xytext=(0, 10),
                                  textcoords='offset points',
                                  ha='center')
@@ -796,11 +897,24 @@ def process_multiple_peaks_one_isotope(data, input_data={}):
             else:
                 # Create labels for each peak in channel units
                 peak_labels = []
+                
+                # Also collect peak heights
+                peak_heights = {}
+                
                 for i, (loc, err) in enumerate(zip(peak_locations, peak_uncertainties)):
                     peak_label = f"Ch: {loc:.1f}±{err:.1f}"
                     # Find the closest channel in the data
                     closest_channel = int(round(loc))
                     peak_labels.append((closest_channel, peak_label))
+                    
+                    # Store the peak height from fit results
+                    peak_key = f"{i+1}" if num_peaks > 1 else 'main'
+                    fit_result = all_results.get(peak_key, {})
+                    if 'peak_height' in fit_result:
+                        peak_heights[str(i)] = fit_result['peak_height']
+                
+                # Add peak heights to data for use in plotting
+                data.peak_heights = peak_heights
                 
                 # Create a new plot with the fitted peak positions labeled
                 title = f"{element_name} Radiation Spectrum (Fitted Peaks)"
@@ -818,17 +932,6 @@ def process_multiple_peaks_one_isotope(data, input_data={}):
         'peak_locations': peak_locations,
         'peak_uncertainties': peak_uncertainties
     }
-
-def ask_for_file_selection():
-    """
-    Ask the user for file selection input.
-    
-    Returns:
-        String containing the user's file selection
-    """
-    print("\nWhich files would you like to process?")
-    print("Enter file numbers separated by commas (e.g., 1,3,5), or 'all' for all files:")
-    return input("Selection: ").strip().lower()
 
 def list_csv_files(folder_path):
     """
@@ -853,6 +956,140 @@ def list_csv_files(folder_path):
     
     return csv_files
 
+def ask_for_file_selection():
+    """
+    Ask the user for file selection input.
+    
+    Returns:
+        String containing the user's file selection
+    """
+    print("\nWhich files would you like to process?")
+    print("Enter file numbers separated by commas (e.g., 1,3,5), or 'all' for all files:")
+    return input("Selection: ").strip().lower()
+
+def process_single_file(filepath, input_data=None, output_folder=None):
+    """
+    Process a single spectrum data file, with multiple peaks.
+    
+    Args:
+        filepath: Path to the CSV file to process
+        input_data: Optional dictionary containing pre-loaded input parameters
+        output_folder: Optional output folder path
+    
+    Returns:
+        Dictionary containing results for this file
+    """
+    # Initialize input_data if not provided
+    if input_data is None:
+        input_data = {}
+    
+    # File ID is the base filename (used as a key in configs)
+    file_id = os.path.basename(filepath)
+    
+    # Get element name from file-specific config if available
+    if file_id in input_data and 'element_name' in input_data[file_id]:
+        element_name = input_data[file_id]['element_name']
+        print(f"\nUsing pre-configured element name for {file_id}: {element_name}")
+    # Otherwise check for global element_name
+    elif 'element_name' in input_data:
+        element_name = input_data['element_name']
+        print(f"\nUsing element name from input data: {element_name}")
+    else:
+        # Suggest from filename
+        filename_base = os.path.splitext(os.path.basename(filepath))[0]
+        print(f"\nSuggested element name based on filename: {filename_base}")
+        print("Press Enter to accept this name, or type a different name:")
+        element_name = input("Element: ") or filename_base
+        
+        # Make sure we have a place to store file-specific settings
+        if file_id not in input_data:
+            input_data[file_id] = {}
+        
+        # Store element name in file-specific config
+        input_data[file_id]['element_name'] = element_name
+    
+    # Format element name for nice titles
+    formatted_element = element_name
+    # Try to identify if there's a number in the element name
+    match = re.match(r'([a-zA-Z]+)(\d+)', element_name)
+    if match:
+        element, number = match.groups()
+        # Capitalize the element and format with a hyphen
+        formatted_element = f"{element.capitalize()}-{number}"
+    
+    try:
+        # Read the data
+        data = read_spectrum_data(filepath)
+        
+        print(f"\nSuccessfully loaded {formatted_element} data with {len(data)} channels")
+        print(f"Max counts: {data['Counts'].max():.0f} at channel {data['Counts'].idxmax()}")
+        
+        # Store filepath in input_data
+        if 'filepaths' not in input_data:
+            input_data['filepaths'] = {}
+        input_data['filepaths'][element_name] = filepath
+        
+        # Make sure we have a section for this file's config
+        if file_id not in input_data:
+            input_data[file_id] = {}
+        
+        # Set element name in file-specific config
+        input_data[file_id]['element_name'] = element_name
+        
+        # Set output folder in file config
+        if output_folder:
+            input_data[file_id]['output_folder'] = output_folder
+            
+        # Process multiple peaks for this single isotope
+        isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data[file_id])
+        
+        # Collect peak information for return
+        all_peak_locations = isotope_data['peak_locations']
+        all_peak_uncertainties = isotope_data['peak_uncertainties']
+        peak_labels = []
+        
+        for j, (loc, err) in enumerate(zip(all_peak_locations, all_peak_uncertainties)):
+            if len(all_peak_locations) > 1:
+                peak_labels.append(f"{element_name}_peak{j+1}")
+            else:
+                peak_labels.append(element_name)
+        
+        # Display summary of peak locations and uncertainties
+        if all_peak_locations:
+            print("\n\n" + "="*70)
+            print(f"SUMMARY OF {formatted_element} PEAK LOCATIONS AND UNCERTAINTIES".center(70))
+            print("="*70)
+            
+            # Print labels for reference
+            print("Peak Labels (for reference only):")
+            for i, label in enumerate(peak_labels):
+                print(f"{i+1}: {label}")
+            
+            print("\nPeak Locations (channels):")
+            print(all_peak_locations)
+            
+            print("\nPeak Uncertainties (channels, 1σ):")
+            print(all_peak_uncertainties)
+            
+            print("="*70)
+            print("Copy-paste the above lists for your records!".center(70))
+            print("="*70)
+        
+        # Configuration will be saved by the caller
+        
+        return {
+            'element_name': element_name,
+            'formatted_name': formatted_element,
+            'results': isotope_data['results'],
+            'peak_locations': all_peak_locations,
+            'peak_uncertainties': all_peak_uncertainties,
+            'peak_labels': peak_labels
+        }
+        
+    except Exception as e:
+        print(f"Error during analysis of {element_name}: {e}")
+        return None
+
 def process_multiple_isotopes(input_data={}):
     """
     Process multiple isotopes, each with potentially multiple peaks.
@@ -866,12 +1103,10 @@ def process_multiple_isotopes(input_data={}):
     all_isotope_results = {}
     output_folder = None
     
-    # Input data is now always a dictionary, so just use it directly
-    
     # For collecting all peak locations across all isotopes
     all_peak_locations = []
     all_peak_uncertainties = []
-    peak_labels = []
+    all_peak_labels = []
     
     # Check if use_folder preference exists in input_data
     if 'use_folder' in input_data:
@@ -908,40 +1143,29 @@ def process_multiple_isotopes(input_data={}):
         for i, file in enumerate(csv_files):
             print(f"{i+1}. {os.path.basename(file)}")
             
-        # Check if file_selection_input is in input_data
-        if 'file_selection_input' in input_data:
-            file_selection = input_data['file_selection_input']
+        # Check if file_selection is in input_data
+        if 'file_selection' in input_data:
+            file_selection = input_data['file_selection']
             print(f"\nUsing pre-loaded file selection: {file_selection}")
-            
-            if file_selection == 'all':
-                selected_files = csv_files
-            else:
-                try:
-                    # Parse selection and convert to 0-based indices
-                    indices = [int(idx.strip()) - 1 for idx in file_selection.split(',')]
-                    selected_files = [csv_files[idx] for idx in indices if 0 <= idx < len(csv_files)]
-                    
-                    if not selected_files:
-                        print("Warning: No valid files from saved selection. Please make a new selection.")
-                        # Fall back to manual selection
-                        file_selection = ask_for_file_selection()
-                        input_data['file_selection_input'] = file_selection
-                            
-                        if file_selection == 'all':
-                            selected_files = csv_files
-                        else:
-                            try:
-                                indices = [int(idx.strip()) - 1 for idx in file_selection.split(',')]
-                                selected_files = [csv_files[idx] for idx in indices if 0 <= idx < len(csv_files)]
-                            except (ValueError, IndexError):
-                                print("Invalid selection. No files will be processed.")
-                                return {}
-                except (ValueError, IndexError):
-                    print("Error in saved file selection. Please make a new selection.")
+        else:
+            # Ask which files to process manually
+            file_selection = ask_for_file_selection()
+            input_data['file_selection'] = file_selection
+        
+        if file_selection == 'all':
+            selected_files = csv_files
+        else:
+            try:
+                # Parse selection and convert to 0-based indices
+                indices = [int(idx.strip()) - 1 for idx in file_selection.split(',')]
+                selected_files = [csv_files[idx] for idx in indices if 0 <= idx < len(csv_files)]
+                
+                if not selected_files:
+                    print("Warning: No valid files from saved selection. Please make a new selection.")
                     # Fall back to manual selection
                     file_selection = ask_for_file_selection()
-                    input_data['file_selection_input'] = file_selection
-                    
+                    input_data['file_selection'] = file_selection
+                        
                     if file_selection == 'all':
                         selected_files = csv_files
                     else:
@@ -951,79 +1175,55 @@ def process_multiple_isotopes(input_data={}):
                         except (ValueError, IndexError):
                             print("Invalid selection. No files will be processed.")
                             return {}
-        else:
-            # Ask which files to process manually
-            file_selection = ask_for_file_selection()
-            input_data['file_selection_input'] = file_selection
-            
-            if file_selection == 'all':
-                selected_files = csv_files
-            else:
-                try:
-                    # Parse selection and convert to 0-based indices
-                    indices = [int(idx.strip()) - 1 for idx in file_selection.split(',')]
-                    selected_files = [csv_files[idx] for idx in indices if 0 <= idx < len(csv_files)]
-                except (ValueError, IndexError):
-                    print("Invalid selection. No files will be processed.")
-                    return {}
+            except (ValueError, IndexError):
+                print("Error in saved file selection. Please make a new selection.")
+                # Fall back to manual selection
+                file_selection = ask_for_file_selection()
+                input_data['file_selection'] = file_selection
+                
+                if file_selection == 'all':
+                    selected_files = csv_files
+                else:
+                    try:
+                        indices = [int(idx.strip()) - 1 for idx in file_selection.split(',')]
+                        selected_files = [csv_files[idx] for idx in indices if 0 <= idx < len(csv_files)]
+                    except (ValueError, IndexError):
+                        print("Invalid selection. No files will be processed.")
+                        return {}
         
-        # Process each selected file
+        # Process each selected file using the process_single_file function
         for i, filepath in enumerate(selected_files):
             print(f"\n\n=== Processing File {i+1} of {len(selected_files)}: {os.path.basename(filepath)} ===")
             
-            # Get element name from input_data if available, otherwise from user or filename
-            if 'element_name' in input_data:
-                element_name = input_data['element_name']
-                print(f"\nUsing element name from input data: {element_name}")
-            else:
-                filename_base = os.path.splitext(os.path.basename(filepath))[0]
-                print(f"\nSuggested element name based on filename: {filename_base}")
-                print("Press Enter to accept this name, or type a different name:")
-                element_name = input("Element: ") or filename_base
+            # Get the file ID to access file-specific config
+            file_id = os.path.basename(filepath)
             
-            # Format element name for nice titles
-            # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
-            # Try to identify if there's a number in the element name
-            import re
-            match = re.match(r'([a-zA-Z]+)(\d+)', element_name)
-            if match:
-                element, number = match.groups()
-                # Capitalize the element and format with a hyphen
-                element_name = f"{element.capitalize()}-{number}"
+            # Create file-specific config if it doesn't exist
+            if file_id not in input_data:
+                input_data[file_id] = {}
+                
+            # Include shared settings in the file-specific config
+            if 'energy_conversion' in input_data:
+                input_data[file_id]['energy_conversion'] = input_data['energy_conversion']
+                
+            # Process the file with its own configuration
+            file_result = process_single_file(filepath, input_data, output_folder)
             
-            try:
-                # Read the data
-                data = read_spectrum_data(filepath)
-                
-                print(f"\nSuccessfully loaded {element_name} data with {len(data)} channels")
-                
-                # Store filepath in input_data
-                if 'filepaths' not in input_data:
-                    input_data['filepaths'] = {}
-                input_data['filepaths'][element_name] = filepath
-                
-                # Store element name and output folder in input_data
-                input_data['element_name'] = element_name
-                input_data['output_folder'] = output_folder
-                
-                # Process multiple peaks for this isotope
-                isotope_data = process_multiple_peaks_one_isotope(data, input_data)
-                
+            if file_result:
+                # Save configuration for this file
+                save_user_input(input_data, f"{file_result['element_name']}_complete", output_folder)
                 # Store results
-                all_isotope_results[element_name] = isotope_data['results']
+                element_name = file_result['element_name']
+                all_isotope_results[element_name] = file_result['results']
                 
-                # Collect peak information
-                for j, (loc, err) in enumerate(zip(isotope_data['peak_locations'], isotope_data['peak_uncertainties'])):
+                # Collect peak information for summary display
+                for j, (loc, err, label) in enumerate(zip(
+                        file_result['peak_locations'], 
+                        file_result['peak_uncertainties'],
+                        file_result['peak_labels'])):
                     all_peak_locations.append(loc)
                     all_peak_uncertainties.append(err)
-                    if len(isotope_data['peak_locations']) > 1:
-                        # Use consistent format with the numbered peak_id
-                        peak_labels.append(f"{element_name} Peak {j+1}")
-                    else:
-                        peak_labels.append(element_name)
-                
-            except Exception as e:
-                print(f"Error during analysis of {element_name}: {e}")
+                    all_peak_labels.append(label)
     else:
         # Manual file entry mode
         # Create output folder in current directory
@@ -1057,56 +1257,39 @@ def process_multiple_isotopes(input_data={}):
                     print(f"Error: File '{filepath}' not found.")
                     continue
             
+            # For manual entry, set element name in input_data here
+            # This makes it clearer where the config for each file starts
+            file_id = os.path.basename(filepath)
+            
             # Get element name from user
             print("\nPlease enter the element name or isotope being analyzed (e.g., Co60, Na22):")
-            element_name = input("Element: ")
-            if not element_name:
-                # Use filename as fallback
-                element_name = os.path.splitext(os.path.basename(filepath))[0]
+            element_name = input("Element: ") or os.path.splitext(file_id)[0]
             
-            # Format element name for nice titles
-            # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
-            # Try to identify if there's a number in the element name
-            import re
-            match = re.match(r'([a-zA-Z]+)(\d+)', element_name)
-            if match:
-                element, number = match.groups()
-                # Capitalize the element and format with a hyphen
-                element_name = f"{element.capitalize()}-{number}"
+            # Set up file-specific config
+            if file_id not in input_data:
+                input_data[file_id] = {'element_name': element_name}
+            else:
+                input_data[file_id]['element_name'] = element_name
             
-            try:
-                # Read the data
-                data = read_spectrum_data(filepath)
-                
-                print(f"\nSuccessfully loaded {element_name} data with {len(data)} channels")
-                
-                # Store filepath in input_data
-                if 'filepaths' not in input_data:
-                    input_data['filepaths'] = {}
-                input_data['filepaths'][element_name] = filepath
-                
-                # Store element name and output folder in input_data
-                input_data['element_name'] = element_name
-                input_data['output_folder'] = output_folder
-                
-                # Process multiple peaks for this isotope
-                isotope_data = process_multiple_peaks_one_isotope(data, input_data)
+            # Process the file using process_single_file
+            file_result = process_single_file(filepath, input_data, output_folder)
+            
+            if file_result:
+                # Save configuration for this file
+                save_user_input(input_data, f"{file_result['element_name']}_complete", output_folder)
                 
                 # Store results
-                all_isotope_results[element_name] = isotope_data['results']
+                element_name = file_result['element_name']
+                all_isotope_results[element_name] = file_result['results']
                 
-                # Collect peak information
-                for j, (loc, err) in enumerate(zip(isotope_data['peak_locations'], isotope_data['peak_uncertainties'])):
+                # Collect peak information for summary display
+                for j, (loc, err, label) in enumerate(zip(
+                        file_result['peak_locations'], 
+                        file_result['peak_uncertainties'],
+                        file_result['peak_labels'])):
                     all_peak_locations.append(loc)
                     all_peak_uncertainties.append(err)
-                    if len(isotope_data['peak_locations']) > 1:
-                        # Use consistent format with the numbered peak_id
-                        peak_labels.append(f"{element_name} Peak {j+1}")
-                    else:
-                        peak_labels.append(element_name)
-                
-            except Exception as e:
-                print(f"Error during analysis of {element_name}: {e}")
+                    all_peak_labels.append(label)
     
     # Display summary of all peak locations and uncertainties
     if all_peak_locations:
@@ -1116,7 +1299,7 @@ def process_multiple_isotopes(input_data={}):
         
         # Print labels for reference (but not for copying)
         print("Peak Labels (for reference only):")
-        for i, label in enumerate(peak_labels):
+        for i, label in enumerate(all_peak_labels):
             print(f"{i+1}: {label}")
         
         print("\nPeak Locations (channels):")
@@ -1125,68 +1308,12 @@ def process_multiple_isotopes(input_data={}):
         print("\nPeak Uncertainties (channels, 1σ):")
         print(all_peak_uncertainties)
         
-        # Ask if user wants to convert to energy
-        use_energy = input("\nDo you want to convert peak locations to energy (MeV)? (y/n): ").lower().startswith('y')
-        
-        if use_energy:
-            # Get conversion parameters (C = a + b*E)
-            print("\nPlease enter the parameters for the conversion: Channel = a + b*Energy(MeV)")
-            while True:
-                try:
-                    a = float(input("Parameter a: "))
-                    a_err = float(input("Uncertainty in a: "))
-                    b = float(input("Parameter b: "))
-                    b_err = float(input("Uncertainty in b: "))
-                    
-                    if b == 0:
-                        print("Error: Parameter 'b' cannot be zero.")
-                        continue
-                    
-                    break
-                except ValueError:
-                    print("Error: Please enter valid numbers.")
-            
-            # Convert peak locations to energy with propagated errors
-            energy_peaks = []
-            energy_uncertainties = []
-            
-            for loc, err in zip(all_peak_locations, all_peak_uncertainties):
-                # Convert channel to energy: E = (C-a)/b
-                energy = (loc - a) / b
-                
-                # Propagate uncertainties
-                # For function E = (C-a)/b, the uncertainty is:
-                # σ_E^2 = (∂E/∂C)^2 * σ_C^2 + (∂E/∂a)^2 * σ_a^2 + (∂E/∂b)^2 * σ_b^2
-                # where ∂E/∂C = 1/b, ∂E/∂a = -1/b, ∂E/∂b = -(C-a)/b^2
-                
-                dE_dC = 1/b
-                dE_da = -1/b
-                dE_db = -(loc-a)/(b**2)
-                
-                energy_err = np.sqrt((dE_dC**2 * err**2) + 
-                                     (dE_da**2 * a_err**2) + 
-                                     (dE_db**2 * b_err**2))
-                
-                energy_peaks.append(energy)
-                energy_uncertainties.append(energy_err)
-            
-            print("\n" + "="*70)
-            print("ENERGY CONVERSION RESULTS".center(70))
-            print("="*70)
-            
-            print("\nPeak Energies (MeV):")
-            print([f"{e:.4f}" for e in energy_peaks])
-            
-            print("\nPeak Energy Uncertainties (MeV, 1σ):")
-            print([f"{e:.4f}" for e in energy_uncertainties])
-            
-            print("\nDetailed Peak Energies:")
-            for i, (energy, err, label) in enumerate(zip(energy_peaks, energy_uncertainties, peak_labels)):
-                print(f"{i+1}: {label} = {energy:.4f} ± {err:.4f} MeV")
-        
         print("\n" + "="*70)
         print("Copy-paste the above lists for your records!".center(70))
         print("="*70)
+    
+    # Save final complete configuration with all updates
+    save_user_input(input_data, "all_isotopes_complete", output_folder)
     
     return all_isotope_results
 
@@ -1209,7 +1336,6 @@ def main():
         # Check if file exists
         if not os.path.isfile(input_filepath):
             print(f"Error: File '{input_filepath}' not found.")
-            use_saved_input = False
         else:
             # Load input data
             loaded_data = load_user_input_from_file(input_filepath)
@@ -1217,26 +1343,29 @@ def main():
                 input_data = loaded_data
             else:
                 print("Error loading input file. Continuing with manual input.")
-                use_saved_input = False
     
-    # Ask if user wants to process multiple isotopes or a single file
-    while True:
-        choice = input("\nDo you want to process (1) a single file or (2) multiple isotopes? (1/2): ")
-        if choice in ['1', '2']:
-            break
-        print("Error: Please enter 1 or 2.")
+    # Check if processing mode is already configured
+    if 'processing_mode' in input_data:
+        processing_mode = input_data['processing_mode']
+        is_single_file = processing_mode == 'single_file'
+        print(f"\nUsing pre-configured processing mode: {'single file' if is_single_file else 'multiple files'}")
+        choice = '1' if is_single_file else '2'
+    else:
+        # Ask if user wants to process multiple files or a single file
+        while True:
+            choice = input("\nDo you want to process (1) a single file or (2) multiple files? (1/2): ")
+            if choice in ['1', '2']:
+                break
+            print("Error: Please enter 1 or 2.")
+        
+        # Store choice in input_data
+        input_data['processing_mode'] = 'single_file' if choice == '1' else 'multiple_files'
     
     if choice == '1':
-        # Store choice in input_data
-        input_data['processing_mode'] = 'single_file'
-            
+        # Single file processing
+        
         # Create output folder in current directory
         output_folder = ensure_output_folder()
-        
-        # For collecting peak information
-        all_peak_locations = []
-        all_peak_uncertainties = []
-        peak_labels = []
         
         # Check if use_folder preference exists in input_data
         if 'use_folder' in input_data:
@@ -1348,85 +1477,17 @@ def main():
                 # Save the filepath
                 input_data['direct_filepath'] = filepath
         
-        # Get element name from input_data if available, otherwise from user or filename
-        if 'element_name' in input_data:
-            element_name = input_data['element_name']
-            print(f"\nUsing element name from input data: {element_name}")
-        else:
-            filename_base = os.path.splitext(os.path.basename(filepath))[0]
-            print(f"\nSuggested element name based on filename: {filename_base}")
-            print("Press Enter to accept this name, or type a different name:")
-            element_name = input("Element: ") or filename_base
+        # Process single file with our core function
+        result = process_single_file(filepath, input_data, output_folder)
         
-        # Format element name for nice titles
-        # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
-        # Try to identify if there's a number in the element name
-        import re
-        match = re.match(r'([a-zA-Z]+)(\d+)', element_name)
-        if match:
-            element, number = match.groups()
-            # Capitalize the element and format with a hyphen
-            element_name = f"{element.capitalize()}-{number}"
-        
-        try:
-            # Read the data
-            data = read_spectrum_data(filepath)
+        # Save configuration for this file
+        if result:
+            file_id = os.path.basename(filepath)
+            save_user_input(input_data, f"{result['element_name']}_complete", output_folder)
             
-            print(f"\nSuccessfully loaded {element_name} data with {len(data)} channels")
-            print(f"Max counts: {data['Counts'].max():.0f} at channel {data['Counts'].idxmax()}")
-            
-            # Store filepath in input_data
-            if 'filepaths' not in input_data:
-                input_data['filepaths'] = {}
-            input_data['filepaths'][element_name] = filepath
-            
-            # Store element name and output folder in input_data
-            input_data['element_name'] = element_name
-            input_data['output_folder'] = output_folder
-            
-            # Process multiple peaks for this single isotope
-            isotope_data = process_multiple_peaks_one_isotope(data, input_data)
-            
-            # Collect peak information
-            for j, (loc, err) in enumerate(zip(isotope_data['peak_locations'], isotope_data['peak_uncertainties'])):
-                all_peak_locations.append(loc)
-                all_peak_uncertainties.append(err)
-                if len(isotope_data['peak_locations']) > 1:
-                    peak_labels.append(f"{element_name}_peak{j+1}")
-                else:
-                    peak_labels.append(element_name)
-            
-            # Display summary of all peak locations and uncertainties
-            if all_peak_locations:
-                print("\n\n" + "="*70)
-                print("SUMMARY OF ALL PEAK LOCATIONS AND UNCERTAINTIES".center(70))
-                print("="*70)
-                
-                # Print labels for reference (but not for copying)
-                print("Peak Labels (for reference only):")
-                for i, label in enumerate(peak_labels):
-                    print(f"{i+1}: {label}")
-                
-                print("\nPeak Locations (channels):")
-                print(all_peak_locations)
-                
-                print("\nPeak Uncertainties (channels, 1σ):")
-                print(all_peak_uncertainties)
-                
-                print("="*70)
-                print("Copy-paste the above lists for your records!".center(70))
-                print("="*70)
-            
-            return {element_name: isotope_data['results']}
-            
-        except Exception as e:
-            print(f"Error during analysis: {e}")
-            return None
+        return result
     else:
-        # Store choice in input_data
-        input_data['processing_mode'] = 'multiple_isotopes'
-            
-        # Process multiple isotopes
+        # Multiple files processing
         return process_multiple_isotopes(input_data)
 
 if __name__ == "__main__":
