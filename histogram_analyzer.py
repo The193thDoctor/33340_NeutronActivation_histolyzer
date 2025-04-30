@@ -725,22 +725,24 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
                 use_energy = input("\nDo you want to convert the x-axis to energy (MeV)? (y/n): ").lower().startswith('y')
             
             if use_energy:
-                # Get conversion parameters (C = a + b*E)
-                print("\nPlease enter the parameters for the conversion: Channel = a + b*Energy(MeV)")
-                while True:
-                    try:
-                        a = float(input("Parameter a: "))
-                        a_err = float(input("Uncertainty in a: "))
-                        b = float(input("Parameter b: "))
-                        b_err = float(input("Uncertainty in b: "))
-                        
-                        if b == 0:
-                            print("Error: Parameter 'b' cannot be zero.")
-                            continue
-                        
-                        break
-                    except ValueError:
-                        print("Error: Please enter valid numbers.")
+                # Only ask for parameters if we don't already have them from the config
+                if a is None or b is None or a_err is None or b_err is None:
+                    # Get conversion parameters (C = a + b*E)
+                    print("\nPlease enter the parameters for the conversion: Channel = a + b*Energy(MeV)")
+                    while True:
+                        try:
+                            a = float(input("Parameter a: "))
+                            a_err = float(input("Uncertainty in a: "))
+                            b = float(input("Parameter b: "))
+                            b_err = float(input("Uncertainty in b: "))
+                            
+                            if b == 0:
+                                print("Error: Parameter 'b' cannot be zero.")
+                                continue
+                            
+                            break
+                        except ValueError:
+                            print("Error: Please enter valid numbers.")
                 
                 # Save energy conversion parameters
                 input_data['energy_conversion'] = {
@@ -1297,22 +1299,41 @@ def process_multiple_isotopes(input_data={}):
         use_energy = input("\nDo you want to convert peak locations to energy (MeV)? (y/n): ").lower().startswith('y')
         
         if use_energy:
-            # Get conversion parameters (C = a + b*E)
-            print("\nPlease enter the parameters for the conversion: Channel = a + b*Energy(MeV)")
-            while True:
-                try:
-                    a = float(input("Parameter a: "))
-                    a_err = float(input("Uncertainty in a: "))
-                    b = float(input("Parameter b: "))
-                    b_err = float(input("Uncertainty in b: "))
-                    
-                    if b == 0:
-                        print("Error: Parameter 'b' cannot be zero.")
-                        continue
-                    
-                    break
-                except ValueError:
-                    print("Error: Please enter valid numbers.")
+            # Check if energy conversion parameters already exist in input_data
+            a = None
+            b = None
+            a_err = None
+            b_err = None
+            
+            if 'energy_conversion' in input_data:
+                energy_conversion = input_data['energy_conversion']
+                a = energy_conversion.get('a')
+                a_err = energy_conversion.get('a_err')
+                b = energy_conversion.get('b')
+                b_err = energy_conversion.get('b_err')
+                
+                if all(param is not None for param in [a, b, a_err, b_err]):
+                    print(f"\nUsing pre-loaded energy conversion parameters:")
+                    print(f"a = {a} ± {a_err}, b = {b} ± {b_err}")
+            
+            # If any parameters are missing, prompt for all of them
+            if any(param is None for param in [a, b, a_err, b_err]):
+                # Get conversion parameters (C = a + b*E)
+                print("\nPlease enter the parameters for the conversion: Channel = a + b*Energy(MeV)")
+                while True:
+                    try:
+                        a = float(input("Parameter a: "))
+                        a_err = float(input("Uncertainty in a: "))
+                        b = float(input("Parameter b: "))
+                        b_err = float(input("Uncertainty in b: "))
+                        
+                        if b == 0:
+                            print("Error: Parameter 'b' cannot be zero.")
+                            continue
+                        
+                        break
+                    except ValueError:
+                        print("Error: Please enter valid numbers.")
             
             # Convert peak locations to energy with propagated errors
             energy_peaks = []
