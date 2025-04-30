@@ -1146,14 +1146,14 @@ def process_multiple_isotopes(input_data={}):
         for i, file in enumerate(csv_files):
             print(f"{i+1}. {os.path.basename(file)}")
             
-        # Check if file_selection_input is in input_data
-        if 'file_selection_input' in input_data:
-            file_selection = input_data['file_selection_input']
+        # Check if file_selection is in input_data
+        if 'file_selection' in input_data:
+            file_selection = input_data['file_selection']
             print(f"\nUsing pre-loaded file selection: {file_selection}")
         else:
             # Ask which files to process manually
             file_selection = ask_for_file_selection()
-            input_data['file_selection_input'] = file_selection
+            input_data['file_selection'] = file_selection
         
         if file_selection == 'all':
             selected_files = csv_files
@@ -1167,7 +1167,7 @@ def process_multiple_isotopes(input_data={}):
                     print("Warning: No valid files from saved selection. Please make a new selection.")
                     # Fall back to manual selection
                     file_selection = ask_for_file_selection()
-                    input_data['file_selection_input'] = file_selection
+                    input_data['file_selection'] = file_selection
                         
                     if file_selection == 'all':
                         selected_files = csv_files
@@ -1182,7 +1182,7 @@ def process_multiple_isotopes(input_data={}):
                 print("Error in saved file selection. Please make a new selection.")
                 # Fall back to manual selection
                 file_selection = ask_for_file_selection()
-                input_data['file_selection_input'] = file_selection
+                input_data['file_selection'] = file_selection
                 
                 if file_selection == 'all':
                     selected_files = csv_files
