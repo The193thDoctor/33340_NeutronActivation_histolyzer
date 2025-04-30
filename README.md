@@ -12,6 +12,9 @@ A Python tool for analyzing gamma radiation spectra, particularly useful for neu
 - Summary of all peak positions across multiple isotopes
 - Automatic output organization
 - Channel to energy conversion with the form Channel = a + b*Energy
+- Save user inputs to JSON for reproducible analysis
+- Load previous analysis settings from JSON files
+- Detailed chi-square statistics for goodness of fit evaluation
 
 ## Installation
 
@@ -50,13 +53,15 @@ The application will intelligently try to interpret various file formats.
 
 ### Workflow
 
-1. Select input mode (single file vs. multiple isotopes)
-2. Choose files from a folder or enter file paths manually
-3. View the full spectrum
-4. Select channels for background subtraction
-5. Review Gaussian fits and uncertainty analysis
-6. Optionally convert channels to energy using the formula Channel = a + b*Energy
-7. Get a summary of all peak positions
+1. Optionally load saved settings from a previous analysis
+2. Select input mode (single file vs. multiple isotopes)
+3. Choose files from a folder or enter file paths manually
+4. View the full spectrum
+5. Select channels for background subtraction
+6. Review Gaussian fits, uncertainty analysis, and chi-square statistics
+7. Optionally convert channels to energy using the formula Channel = a + b*Energy
+8. Get a summary of all peak positions
+9. Save all inputs and settings to JSON for reproducibility
 
 ### Output
 
@@ -65,6 +70,7 @@ The tool generates:
 - Gaussian fit visualizations with uncertainty bands
 - Processed data files (.csv)
 - Fit results with detailed uncertainty estimates (.csv)
+- JSON files containing all user inputs for reproducibility (.json)
 
 ## Examples
 

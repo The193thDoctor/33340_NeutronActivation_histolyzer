@@ -25,9 +25,18 @@ Process multiple files representing different isotopes:
 
 ## Detailed Workflow
 
-### 1. File Selection
+### 1. Loading Previous Settings (Optional)
 
-When the program starts, you'll be asked to choose a processing mode:
+When you start the program, you'll be asked if you want to load settings from a previous analysis:
+```
+Do you want to use a saved input file? (y/n):
+```
+
+If you choose 'y', you'll be prompted to enter the path to a JSON file containing previously saved settings. This allows you to reproduce an analysis with exactly the same parameters.
+
+### 2. File Selection
+
+Next, you'll be asked to choose a processing mode:
 ```
 Do you want to process (1) a single file or (2) multiple isotopes? (1/2):
 ```
@@ -36,14 +45,16 @@ You can either:
 - Select files from a folder: The program will show all CSV files in the folder
 - Enter file paths manually: Type the full path to your spectrum file
 
-### 2. Spectrum Visualization
+When using saved inputs, the program will automatically use the previously selected files and parameters.
+
+### 3. Spectrum Visualization
 
 For each file, the program will:
 - Show basic statistics about the loaded data
 - Display the full spectrum as a histogram
 - Ask how many peaks you want to analyze
 
-### 3. Peak Analysis
+### 4. Peak Analysis
 
 For each peak:
 1. You'll need to select two channels to define the background region:
@@ -58,8 +69,10 @@ For each peak:
    - Subtract a linear background between your chosen points
    - Fit a Gaussian curve to the background-subtracted peak
    - Calculate the peak center and its uncertainty through multiple methods
+   - Calculate the reduced chi-square value to evaluate goodness of fit
+   - For saved inputs, these steps will be performed automatically using the saved parameters
 
-### 4. Output and Results
+### 5. Output and Results
 
 For each analyzed peak, the program generates:
 
@@ -76,11 +89,17 @@ For each analyzed peak, the program generates:
 3. **Summary Statistics**:
    - A table of all peak positions with uncertainties
    - Labels for each peak for easy reference
+   
+4. **Input Records**:
+   - `[element]_input.json`: JSON file containing all user inputs and parameters
+   - This file can be loaded in future sessions to reproduce the analysis
 
 ## Example Session
 
 ```
 === Radiation Spectrum Analysis Tool ===
+
+Do you want to use a saved input file? (y/n): n
 
 Do you want to process (1) a single file or (2) multiple isotopes? (1/2): 1
 
@@ -120,9 +139,13 @@ Enter ending channel for cobalt60 Peak 2: 500
 
 [Analysis proceeds with plots and results...]
 
+Reduced Chi-square: 1.2345 (DoF: 68)
+
 Do you want to create a spectrum with labeled peak positions? (y/n): y
 
 [Final labeled spectrum is displayed with both peaks marked]
+
+User inputs saved to: output/cobalt60_input.json
 
 ======================================================================
                 SUMMARY OF ALL PEAK LOCATIONS AND UNCERTAINTIES       
