@@ -23,11 +23,30 @@ Process multiple files representing different isotopes:
 - Organizes outputs by isotope name
 - Generates summary of all peaks across all isotopes
 
+### Input Saving/Loading Feature
+The program now offers comprehensive functionality to save and load all user inputs:
+- All user inputs are automatically saved to a JSON file in the output folder
+- The saved inputs include:
+  - File paths and folder locations
+  - Element names
+  - Peak selection parameters (start/end channels)
+  - Energy conversion parameters and plot settings
+  - User interface preferences
+- You can load these saved inputs when running the program again
+- This makes it easy to completely reproduce analyses without having to re-enter any parameters
+
 ## Detailed Workflow
 
-### 1. File Selection
+### 1. Input Selection
 
-When the program starts, you'll be asked to choose a processing mode:
+When the program starts, you'll first be asked if you want to use a saved input file:
+```
+Do you want to use a saved input file? (y/n):
+```
+
+If you choose 'yes', you'll be prompted to enter the path to a previously saved JSON input file.
+
+Next, you'll be asked to choose a processing mode:
 ```
 Do you want to process (1) a single file or (2) multiple isotopes? (1/2):
 ```
@@ -156,3 +175,14 @@ Peak Uncertainties (channels, 1σ):
    - The program calculates uncertainty through multiple methods and uses the most conservative
    - For publication-quality results, note the reduced chi-square value of the fits
    - Peaks with high channel counts will typically have lower relative uncertainty
+
+4. **Using Input Files**:
+   - The program automatically saves ALL your inputs to JSON files (example: `element_input.json`)
+   - This includes file paths, folder locations, peak parameters, energy calibration, and UI preferences
+   - You can edit these files manually or use them directly for future runs
+   - A sample input file format is provided as `sample_input.json`
+   - This feature is especially useful for:
+     - Batch processing
+     - Reproducing analyses exactly
+     - Sharing analysis parameters with colleagues
+     - Creating standardized processing workflows
