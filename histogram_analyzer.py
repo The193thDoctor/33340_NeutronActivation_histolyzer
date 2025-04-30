@@ -951,13 +951,22 @@ def list_csv_files(folder_path):
     
     return csv_files
 
-def ask_for_file_selection():
+def ask_for_file_selection(input_data=None):
     """
     Ask the user for file selection input.
+    
+    Args:
+        input_data: Optional dictionary containing pre-loaded input parameters
     
     Returns:
         String containing the user's file selection
     """
+    # Check if file_selection_input exists in input_data
+    if input_data and 'file_selection_input' in input_data:
+        file_selection = input_data['file_selection_input']
+        print(f"\nUsing pre-configured file selection: {file_selection}")
+        return file_selection
+    
     print("\nWhich files would you like to process?")
     print("Enter file numbers separated by commas (e.g., 1,3,5), or 'all' for all files:")
     return input("Selection: ").strip().lower()
@@ -1146,14 +1155,10 @@ def process_multiple_isotopes(input_data={}):
         for i, file in enumerate(csv_files):
             print(f"{i+1}. {os.path.basename(file)}")
             
-        # Check if file_selection_input is in input_data
-        if 'file_selection_input' in input_data:
-            file_selection = input_data['file_selection_input']
-            print(f"\nUsing pre-loaded file selection: {file_selection}")
-        else:
-            # Ask which files to process manually
-            file_selection = ask_for_file_selection()
-            input_data['file_selection_input'] = file_selection
+        # Ask which files to process using our helper function
+        # that checks for pre-configured file_selection
+        file_selection = ask_for_file_selection(input_data)
+        input_data['file_selection_input'] = file_selection
         
         if file_selection == 'all':
             selected_files = csv_files
@@ -1166,7 +1171,7 @@ def process_multiple_isotopes(input_data={}):
                 if not selected_files:
                     print("Warning: No valid files from saved selection. Please make a new selection.")
                     # Fall back to manual selection
-                    file_selection = ask_for_file_selection()
+                    file_selection = ask_for_file_selection(input_data)
                     input_data['file_selection_input'] = file_selection
                         
                     if file_selection == 'all':
@@ -1181,7 +1186,7 @@ def process_multiple_isotopes(input_data={}):
             except (ValueError, IndexError):
                 print("Error in saved file selection. Please make a new selection.")
                 # Fall back to manual selection
-                file_selection = ask_for_file_selection()
+                file_selection = ask_for_file_selection(input_data)
                 input_data['file_selection_input'] = file_selection
                 
                 if file_selection == 'all':
