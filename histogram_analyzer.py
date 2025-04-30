@@ -951,22 +951,13 @@ def list_csv_files(folder_path):
     
     return csv_files
 
-def ask_for_file_selection(input_data=None):
+def ask_for_file_selection():
     """
     Ask the user for file selection input.
-    
-    Args:
-        input_data: Optional dictionary containing pre-loaded input parameters
     
     Returns:
         String containing the user's file selection
     """
-    # Check if file_selection_input exists in input_data
-    if input_data and 'file_selection_input' in input_data:
-        file_selection = input_data['file_selection_input']
-        print(f"\nUsing pre-configured file selection: {file_selection}")
-        return file_selection
-    
     print("\nWhich files would you like to process?")
     print("Enter file numbers separated by commas (e.g., 1,3,5), or 'all' for all files:")
     return input("Selection: ").strip().lower()
@@ -1155,10 +1146,14 @@ def process_multiple_isotopes(input_data={}):
         for i, file in enumerate(csv_files):
             print(f"{i+1}. {os.path.basename(file)}")
             
-        # Ask which files to process using our helper function
-        # that checks for pre-configured file_selection
-        file_selection = ask_for_file_selection(input_data)
-        input_data['file_selection_input'] = file_selection
+        # Check if file_selection_input is in input_data
+        if 'file_selection_input' in input_data:
+            file_selection = input_data['file_selection_input']
+            print(f"\nUsing pre-loaded file selection: {file_selection}")
+        else:
+            # Ask which files to process manually
+            file_selection = ask_for_file_selection()
+            input_data['file_selection_input'] = file_selection
         
         if file_selection == 'all':
             selected_files = csv_files
@@ -1171,7 +1166,7 @@ def process_multiple_isotopes(input_data={}):
                 if not selected_files:
                     print("Warning: No valid files from saved selection. Please make a new selection.")
                     # Fall back to manual selection
-                    file_selection = ask_for_file_selection(input_data)
+                    file_selection = ask_for_file_selection()
                     input_data['file_selection_input'] = file_selection
                         
                     if file_selection == 'all':
@@ -1186,7 +1181,7 @@ def process_multiple_isotopes(input_data={}):
             except (ValueError, IndexError):
                 print("Error in saved file selection. Please make a new selection.")
                 # Fall back to manual selection
-                file_selection = ask_for_file_selection(input_data)
+                file_selection = ask_for_file_selection()
                 input_data['file_selection_input'] = file_selection
                 
                 if file_selection == 'all':
@@ -1423,15 +1418,22 @@ def main():
             else:
                 print("Error loading input file. Continuing with manual input.")
     
-    # Ask if user wants to process multiple files or a single file
-    while True:
-        choice = input("\nDo you want to process (1) a single file or (2) multiple files? (1/2): ")
-        if choice in ['1', '2']:
-            break
-        print("Error: Please enter 1 or 2.")
-    
-    # Store choice in input_data
-    input_data['processing_mode'] = 'single_file' if choice == '1' else 'multiple_files'
+    # Check if processing mode is already configured
+    if 'processing_mode' in input_data:
+        processing_mode = input_data['processing_mode']
+        is_single_file = processing_mode == 'single_file'
+        print(f"\nUsing pre-configured processing mode: {'single file' if is_single_file else 'multiple files'}")
+        choice = '1' if is_single_file else '2'
+    else:
+        # Ask if user wants to process multiple files or a single file
+        while True:
+            choice = input("\nDo you want to process (1) a single file or (2) multiple files? (1/2): ")
+            if choice in ['1', '2']:
+                break
+            print("Error: Please enter 1 or 2.")
+        
+        # Store choice in input_data
+        input_data['processing_mode'] = 'single_file' if choice == '1' else 'multiple_files'
     
     if choice == '1':
         # Single file processing
