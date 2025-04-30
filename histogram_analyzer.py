@@ -1058,11 +1058,15 @@ def process_multiple_isotopes(input_data={}):
         for i, filepath in enumerate(selected_files):
             print(f"\n\n=== Processing File {i+1} of {len(selected_files)}: {os.path.basename(filepath)} ===")
             
-            # Get element name from user or use filename
-            filename_base = os.path.splitext(os.path.basename(filepath))[0]
-            print(f"\nSuggested element name based on filename: {filename_base}")
-            print("Press Enter to accept this name, or type a different name:")
-            element_name = input("Element: ") or filename_base
+            # Get element name from input_data if available, otherwise from user or filename
+            if 'element_name' in input_data:
+                element_name = input_data['element_name']
+                print(f"\nUsing element name from input data: {element_name}")
+            else:
+                filename_base = os.path.splitext(os.path.basename(filepath))[0]
+                print(f"\nSuggested element name based on filename: {filename_base}")
+                print("Press Enter to accept this name, or type a different name:")
+                element_name = input("Element: ") or filename_base
             
             # Format element name for nice titles
             # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
@@ -1425,11 +1429,15 @@ def main():
                 # Save the filepath
                 input_data['direct_filepath'] = filepath
         
-        # Get element name from user or use filename
-        filename_base = os.path.splitext(os.path.basename(filepath))[0]
-        print(f"\nSuggested element name based on filename: {filename_base}")
-        print("Press Enter to accept this name, or type a different name:")
-        element_name = input("Element: ") or filename_base
+        # Get element name from input_data if available, otherwise from user or filename
+        if 'element_name' in input_data:
+            element_name = input_data['element_name']
+            print(f"\nUsing element name from input data: {element_name}")
+        else:
+            filename_base = os.path.splitext(os.path.basename(filepath))[0]
+            print(f"\nSuggested element name based on filename: {filename_base}")
+            print("Press Enter to accept this name, or type a different name:")
+            element_name = input("Element: ") or filename_base
         
         # Format element name for nice titles
         # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
