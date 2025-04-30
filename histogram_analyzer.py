@@ -1039,18 +1039,12 @@ def process_single_file(filepath, input_data=None, output_folder=None):
         # Set element name in file-specific config
         input_data[file_id]['element_name'] = element_name
         
-        # Process the file with its file-specific config
-        file_config = input_data[file_id]
-        
         # Set output folder in file config
         if output_folder:
-            file_config['output_folder'] = output_folder
+            input_data[file_id]['output_folder'] = output_folder
             
         # Process multiple peaks for this single isotope
-        isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, file_config)
-        
-        # Update the file-specific config with any changes from processing
-        input_data[file_id] = file_config
+        isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data[file_id])
         
         # Collect peak information for return
         all_peak_locations = isotope_data['peak_locations']
@@ -1211,24 +1205,16 @@ def process_multiple_isotopes(input_data={}):
             if file_id not in input_data:
                 input_data[file_id] = {}
                 
-            # Copy relevant global settings to file config
-            file_config = input_data[file_id].copy()
-            
-            # Include shared settings that might be needed
+            # Include shared settings in the file-specific config
             if 'energy_conversion' in input_data:
-                file_config['energy_conversion'] = input_data['energy_conversion']
+                input_data[file_id]['energy_conversion'] = input_data['energy_conversion']
                 
             # Process the file with its own configuration
-            file_result = process_single_file(filepath, file_config, output_folder)
+            file_result = process_single_file(filepath, input_data, output_folder)
             
-            # Update the main input_data with any changes from processing
             if file_result:
-                input_data[file_id] = file_config
-                
                 # Save configuration for this file
                 save_user_input(input_data, f"{file_result['element_name']}_complete", output_folder)
-            
-            if file_result:
                 # Store results
                 element_name = file_result['element_name']
                 all_isotope_results[element_name] = file_result['results']
@@ -1292,6 +1278,9 @@ def process_multiple_isotopes(input_data={}):
             file_result = process_single_file(filepath, input_data, output_folder)
             
             if file_result:
+                # Save configuration for this file
+                save_user_input(input_data, f"{file_result['element_name']}_complete", output_folder)
+                
                 # Store results
                 element_name = file_result['element_name']
                 all_isotope_results[element_name] = file_result['results']
