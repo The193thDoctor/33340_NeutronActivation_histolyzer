@@ -552,27 +552,24 @@ def process_peak(data, element_name, peak_id=None, output_folder=None, input_dat
     
     return fit_results
 
-def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, input_data={}):
+def process_multiple_peaks_one_isotope(data, input_data={}):
     """
     Process multiple peaks for a single isotope.
     
     Args:
         data: DataFrame with channels and counts
-        element_name: Name of the element being analyzed
-        output_folder: Optional output folder path
-        input_data: Optional pre-loaded input data
+        input_data: Dictionary containing input parameters including element_name and output_folder
     
     Returns:
         Dictionary containing peak results and additional information
     """
-    # Input data is now always a dictionary, so just use it directly
+    # Extract element_name and output_folder from input_data
+    element_name = input_data.get('element_name', '')
+    output_folder = input_data.get('output_folder', None)
     
-    # Store element name
-    input_data['element_name'] = element_name
-    
-    # Store output folder
-    if output_folder:
-        input_data['output_folder'] = output_folder
+    # Ensure we have a valid element name
+    if not element_name:
+        raise ValueError("Element name must be provided in input_data")
     
     # Plot the initial spectrum without peak labels
     title = f"{element_name} Radiation Spectrum"
@@ -974,11 +971,15 @@ def process_multiple_isotopes(input_data={}):
         for i, filepath in enumerate(selected_files):
             print(f"\n\n=== Processing File {i+1} of {len(selected_files)}: {os.path.basename(filepath)} ===")
             
-            # Get element name from user or use filename
-            filename_base = os.path.splitext(os.path.basename(filepath))[0]
-            print(f"\nSuggested element name based on filename: {filename_base}")
-            print("Press Enter to accept this name, or type a different name:")
-            element_name = input("Element: ") or filename_base
+            # Get element name from input_data if available, otherwise from user or filename
+            if 'element_name' in input_data:
+                element_name = input_data['element_name']
+                print(f"\nUsing element name from input data: {element_name}")
+            else:
+                filename_base = os.path.splitext(os.path.basename(filepath))[0]
+                print(f"\nSuggested element name based on filename: {filename_base}")
+                print("Press Enter to accept this name, or type a different name:")
+                element_name = input("Element: ") or filename_base
             
             # Format element name for nice titles
             # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
@@ -1001,8 +1002,12 @@ def process_multiple_isotopes(input_data={}):
                     input_data['filepaths'] = {}
                 input_data['filepaths'][element_name] = filepath
                 
+                # Store element name and output folder in input_data
+                input_data['element_name'] = element_name
+                input_data['output_folder'] = output_folder
+                
                 # Process multiple peaks for this isotope
-                isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data)
+                isotope_data = process_multiple_peaks_one_isotope(data, input_data)
                 
                 # Store results
                 all_isotope_results[element_name] = isotope_data['results']
@@ -1080,8 +1085,12 @@ def process_multiple_isotopes(input_data={}):
                     input_data['filepaths'] = {}
                 input_data['filepaths'][element_name] = filepath
                 
+                # Store element name and output folder in input_data
+                input_data['element_name'] = element_name
+                input_data['output_folder'] = output_folder
+                
                 # Process multiple peaks for this isotope
-                isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data)
+                isotope_data = process_multiple_peaks_one_isotope(data, input_data)
                 
                 # Store results
                 all_isotope_results[element_name] = isotope_data['results']
@@ -1339,11 +1348,15 @@ def main():
                 # Save the filepath
                 input_data['direct_filepath'] = filepath
         
-        # Get element name from user or use filename
-        filename_base = os.path.splitext(os.path.basename(filepath))[0]
-        print(f"\nSuggested element name based on filename: {filename_base}")
-        print("Press Enter to accept this name, or type a different name:")
-        element_name = input("Element: ") or filename_base
+        # Get element name from input_data if available, otherwise from user or filename
+        if 'element_name' in input_data:
+            element_name = input_data['element_name']
+            print(f"\nUsing element name from input data: {element_name}")
+        else:
+            filename_base = os.path.splitext(os.path.basename(filepath))[0]
+            print(f"\nSuggested element name based on filename: {filename_base}")
+            print("Press Enter to accept this name, or type a different name:")
+            element_name = input("Element: ") or filename_base
         
         # Format element name for nice titles
         # This handles cases like "co60" -> "Co-60" or "na22" -> "Na-22"
@@ -1367,8 +1380,12 @@ def main():
                 input_data['filepaths'] = {}
             input_data['filepaths'][element_name] = filepath
             
+            # Store element name and output folder in input_data
+            input_data['element_name'] = element_name
+            input_data['output_folder'] = output_folder
+            
             # Process multiple peaks for this single isotope
-            isotope_data = process_multiple_peaks_one_isotope(data, element_name, output_folder, input_data)
+            isotope_data = process_multiple_peaks_one_isotope(data, input_data)
             
             # Collect peak information
             for j, (loc, err) in enumerate(zip(isotope_data['peak_locations'], isotope_data['peak_uncertainties'])):
