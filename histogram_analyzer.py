@@ -5,6 +5,7 @@ import os
 import pathlib
 import json
 import datetime
+import re
 from scipy.signal import find_peaks
 from scipy.optimize import curve_fit
 from scipy import stats
