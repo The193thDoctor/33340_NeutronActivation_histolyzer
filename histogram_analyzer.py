@@ -648,8 +648,16 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
     Returns:
         Dictionary containing peak results and additional information
     """
-    # Store element name
-    input_data['element_name'] = element_name
+    # Get file ID if possible for file-specific settings
+    file_id = None
+    for f_id, config in input_data.items():
+        if isinstance(config, dict) and config.get('element_name') == element_name:
+            file_id = f_id
+            break
+            
+    # Store element name in file-specific section if possible
+    if file_id:
+        input_data[file_id]['element_name'] = element_name
     
     # Store output folder
     if output_folder:
@@ -1000,8 +1008,7 @@ def process_single_file(filepath, input_data=None, output_folder=None):
         if file_id not in input_data:
             input_data[file_id] = {}
         
-        # Store element name in both places for backward compatibility
-        input_data['element_name'] = element_name
+        # Store element name in file-specific config
         input_data[file_id]['element_name'] = element_name
     
     # Format element name for nice titles
@@ -1077,8 +1084,7 @@ def process_single_file(filepath, input_data=None, output_folder=None):
             print("Copy-paste the above lists for your records!".center(70))
             print("="*70)
         
-        # Save the configuration with all updates
-        save_user_input(input_data, f"{element_name}_complete", output_folder)
+        # Configuration will be saved by the caller
         
         return {
             'element_name': element_name,
@@ -1198,8 +1204,29 @@ def process_multiple_isotopes(input_data={}):
         for i, filepath in enumerate(selected_files):
             print(f"\n\n=== Processing File {i+1} of {len(selected_files)}: {os.path.basename(filepath)} ===")
             
-            # Process the file with a copy of the input_data to avoid cross-file configuration issues
-            file_result = process_single_file(filepath, input_data, output_folder)
+            # Get the file ID to access file-specific config
+            file_id = os.path.basename(filepath)
+            
+            # Create file-specific config if it doesn't exist
+            if file_id not in input_data:
+                input_data[file_id] = {}
+                
+            # Copy relevant global settings to file config
+            file_config = input_data[file_id].copy()
+            
+            # Include shared settings that might be needed
+            if 'energy_conversion' in input_data:
+                file_config['energy_conversion'] = input_data['energy_conversion']
+                
+            # Process the file with its own configuration
+            file_result = process_single_file(filepath, file_config, output_folder)
+            
+            # Update the main input_data with any changes from processing
+            if file_result:
+                input_data[file_id] = file_config
+                
+                # Save configuration for this file
+                save_user_input(input_data, f"{file_result['element_name']}_complete", output_folder)
             
             if file_result:
                 # Store results
@@ -1465,7 +1492,14 @@ def main():
                 input_data['direct_filepath'] = filepath
         
         # Process single file with our core function
-        return process_single_file(filepath, input_data, output_folder)
+        result = process_single_file(filepath, input_data, output_folder)
+        
+        # Save configuration for this file
+        if result:
+            file_id = os.path.basename(filepath)
+            save_user_input(input_data, f"{result['element_name']}_complete", output_folder)
+            
+        return result
     else:
         # Multiple files processing
         return process_multiple_isotopes(input_data)
