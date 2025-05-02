@@ -114,7 +114,7 @@ The four error components are:
 
 1. **Statistical error**: The formal uncertainty derived from the covariance matrix of the Gaussian fit. This represents the statistical uncertainty inherent in fitting a mathematical model to experimental data.
 
-2. **Window variation error**: This error is calculated by varying the selection window endpoints by ±5% of the window size and performing 5 independent Gaussian fits. The standard deviation of these peak positions provides an estimate of how sensitive the measurement is to the specific window selection.
+2. **Window variation error**: This error is calculated by varying the selection window endpoints by ±5% of the window size and performing 1000 independent Gaussian fits (configurable via the WINDOW_VARIATION_RUNS parameter). The standard deviation of these peak positions provides an estimate of how sensitive the measurement is to the specific window selection.
 
 3. **Channel discretization error**: A fixed value of 0.5 channels that accounts for the inherent uncertainty due to the discrete nature of the channel data. Since data is binned into integer channels, there is a minimum positional uncertainty of half a channel width.
 

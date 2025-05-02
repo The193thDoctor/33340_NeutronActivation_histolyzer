@@ -10,6 +10,9 @@ from scipy.signal import find_peaks
 from scipy.optimize import curve_fit
 from scipy import stats
 
+# Configuration parameters
+WINDOW_VARIATION_RUNS = 1000  # Number of runs for window variation uncertainty estimation
+
 def read_spectrum_data(filepath):
     """
     Read spectroscopy data from CSV file and extract histogram data.
@@ -134,8 +137,6 @@ def plot_histogram(data, element_name, title=None, file_prefix=None, output_fold
             # If we have peak heights data, use it
             if isinstance(peak_heights, dict) and str(i) in peak_heights:
                 label_height = peak_heights[str(i)]
-                # Ensure label is visible
-                label_height = max(label_height, data['Counts'].max() * 0.25)
             else:
                 # Fallback to actual count or 90% of max
                 label_height = data.loc[data['Channel'] == channel, 'Counts'].values[0] if channel in data['Channel'].values else data['Counts'].max() * 0.9
@@ -278,7 +279,7 @@ def find_peak_with_background_subtraction_and_fit(data, start_ch, end_ch, elemen
         window_size = end_ch - start_ch
         
         # Using a fixed seed would defeat the randomness, so don't set one
-        for i in range(5):
+        for i in range(WINDOW_VARIATION_RUNS):
             # Vary window endpoints by random amounts within 5% of window size
             # Make sure we're generating new random values each time
             var_window_left = max(0, start_ch + int(np.random.uniform(-0.05, 0.05) * window_size))
@@ -865,8 +866,6 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
                     # Use fitted peak height if available
                     if 'peak_height' in fit_result:
                         label_height = fit_result['peak_height']
-                        # For very small peaks, ensure the label is visible
-                        label_height = max(label_height, data['Counts'].max() * 0.25)
                     else:
                         # Fallback to actual count or 90% of max
                         label_height = data.loc[data['Channel'] == channel, 'Counts'].values[0] if channel in data['Channel'].values else data['Counts'].max() * 0.9
@@ -914,6 +913,7 @@ def process_multiple_peaks_one_isotope(data, element_name, output_folder=None, i
                     peak_key = f"{i+1}" if num_peaks > 1 else 'main'
                     fit_result = all_results.get(peak_key, {})
                     if 'peak_height' in fit_result:
+                        # Store the original peak height 
                         peak_heights[str(i)] = fit_result['peak_height']
                 
                 # Add peak heights to data for use in plotting
